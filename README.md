@@ -88,7 +88,31 @@ The fetcher routes by asset class:
 
 Open interest and funding aren't available from these free sources — they're written as 0 in the CSV. The ranker tolerates missing OI/funding (those z-score components contribute 0).
 
-**Sourcing historical news:** this is the hard part. RSS feeds aren't queryable historically. Options: GDELT (free, full-history, broad coverage but noisy), yfinance (~30 days), EDGAR (full filings history), or a paid news archive. Without news, you can still validate the ranker, BTC-beta gate, and suppression chain — just omit `--news` and pass `--no-classify`.
+**Sourcing historical news (built-in fetcher):**
+
+```bash
+# Pull a date range of news for selected tickers from GDELT (free, no key)
+python -m radar.fetch_news --tickers BTC,ETH,ARB \
+    --start 2024-01-15 --end 2024-01-22 \
+    --out data/news_archive.json
+```
+
+GDELT covers ~2017-present at ~15-min resolution. The fetcher applies a small
+finance-source whitelist (Reuters, Bloomberg, CNBC, CoinDesk, The Block) by
+default to keep the archive lean — pass `--no-whitelist` to broaden coverage.
+Per-ticker query terms are tuned in `QUERY_TERMS` in `radar/fetch_news.py`.
+
+If you don't want to bother with news, omit `--news` from the replay invocation
+and pass `--no-classify` — the ranker, BTC-beta gate, and suppression chain
+are still fully validated.
+
+**Putting it together — full historical replay in three commands:**
+
+```bash
+python -m radar.fetch_bars --tickers BTC,ETH,ARB --days 14 --out data/bars.csv
+python -m radar.fetch_news --tickers BTC,ETH,ARB --start 2024-01-15 --end 2024-01-29 --out data/news.json
+python -m radar.replay --bars data/bars.csv --news data/news.json --no-classify
+```
 
 **Programmatic API:**
 
