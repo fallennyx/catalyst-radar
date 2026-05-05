@@ -154,3 +154,46 @@ def test_replay_handles_empty_news(tmp_path):
         classify=False,
     )
     assert counts["cycles"] >= 10
+
+
+# ---------- summary ----------
+
+def test_summarize_returns_per_ticker_emit_counts(tmp_path):
+    db = tmp_path / "summary.db"
+    replay.replay(
+        bars_csv=SAMPLE_BARS,
+        news_json=SAMPLE_NEWS,
+        db_path=str(db),
+        classify=False,
+    )
+    summary = replay.summarize(str(db))
+    tickers = {row["ticker"] for row in summary["emitted_by_ticker"]}
+    # Both pumps in the sample data should appear
+    assert "ARB" in tickers
+    assert "BTC" in tickers
+
+
+def test_summarize_groups_drop_reasons_by_rule(tmp_path):
+    """Force drops by exhausting the daily budget, then check rule grouping."""
+    db = tmp_path / "drops.db"
+    storage.init_db(str(db))
+    storage.set_clock(lambda: 1_705_276_800)
+    try:
+        # Seed enough EMITs to trip the budget for any subsequent alert.
+        for i in range(config.DAILY_ALERT_BUDGET + 3):
+            seed = Alert(
+                ticker=f"X{i:02d}",
+                asset_class="equity",
+                score=1.0,
+                alpha_z=float("inf"),
+                r_alpha_pct=10.0,
+            )
+            decision = "EMIT" if i < config.DAILY_ALERT_BUDGET else "DROP"
+            reason = "ok" if decision == "EMIT" else "budget_throttle: too many"
+            storage.record_alert(seed, decision=decision, reason=reason, db_path=str(db))
+    finally:
+        storage.set_clock(None)
+
+    summary = replay.summarize(str(db))
+    rules = [row["rule"] for row in summary["drops_by_rule"]]
+    assert "budget_throttle" in rules

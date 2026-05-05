@@ -218,6 +218,70 @@ def _btc_returns(db_path: str) -> list[float]:
     return _history_for("BTC", db_path).get("ret_1h", [])
 
 
+# ============ summary report ============
+
+def summarize(db_path: str) -> dict[str, Any]:
+    """Compute a per-ticker / per-rule breakdown from the replay DB."""
+    emitted = storage.execute(
+        "SELECT ticker, asset_class, COUNT(*) AS n "
+        "FROM alerts WHERE decision = 'EMIT' "
+        "GROUP BY ticker, asset_class ORDER BY n DESC LIMIT 25",
+        db_path=db_path,
+    )
+    drop_reasons = storage.execute(
+        "SELECT CASE "
+        "  WHEN instr(reason, ':') > 0 THEN substr(reason, 1, instr(reason, ':') - 1) "
+        "  ELSE reason END AS rule, "
+        "COUNT(*) AS n "
+        "FROM alerts WHERE decision = 'DROP' "
+        "GROUP BY rule ORDER BY n DESC",
+        db_path=db_path,
+    )
+    catalysts = storage.execute(
+        "SELECT catalyst_type, direction, COUNT(*) AS n "
+        "FROM alerts WHERE decision = 'EMIT' AND catalyst_type IS NOT NULL "
+        "GROUP BY catalyst_type, direction ORDER BY n DESC LIMIT 25",
+        db_path=db_path,
+    )
+    return {
+        "emitted_by_ticker": [
+            {"ticker": r["ticker"], "asset_class": r["asset_class"], "n": r["n"]}
+            for r in emitted
+        ],
+        "drops_by_rule": [
+            {"rule": r["rule"], "n": r["n"]} for r in drop_reasons
+        ],
+        "catalysts": [
+            {"type": r["catalyst_type"], "direction": r["direction"], "n": r["n"]}
+            for r in catalysts
+        ],
+    }
+
+
+def _print_summary(counts: dict[str, int], summary: dict[str, Any]) -> None:
+    print()
+    print("=== Replay Summary ===")
+    print(f"  cycles  = {counts['cycles']}")
+    print(f"  emitted = {counts['emitted']}")
+    print(f"  dropped = {counts['dropped']}")
+
+    if summary["emitted_by_ticker"]:
+        print("\n  Emitted by ticker:")
+        for row in summary["emitted_by_ticker"]:
+            print(f"    {row['ticker']:10s} {row['asset_class']:12s} {row['n']:>4d}")
+
+    if summary["drops_by_rule"]:
+        print("\n  Drops by rule:")
+        for row in summary["drops_by_rule"]:
+            print(f"    {row['rule']:20s} {row['n']:>4d}")
+
+    if summary["catalysts"]:
+        print("\n  Catalyst types (EMIT only):")
+        for row in summary["catalysts"]:
+            print(f"    {row['type']:18s} {row['direction']:8s} {row['n']:>4d}")
+    print()
+
+
 # ============ public API ============
 
 def replay(
@@ -226,6 +290,7 @@ def replay(
     db_path: str = "data/replay.db",
     classify: bool = True,
     emit_fn: Callable[[Alert, Any], None] | None = None,
+    print_summary: bool = False,
 ) -> dict[str, int]:
     """Run a full historical replay. Returns counts: cycles/emitted/dropped."""
     bars_by_ts = load_bars(bars_csv)
@@ -307,6 +372,11 @@ def replay(
         config.DB_PATH = original_db_path
 
     log.info("replay done: %s", counts)
+    if print_summary:
+        try:
+            _print_summary(counts, summarize(db_path))
+        except Exception as e:
+            log.warning("summary failed: %s", e)
     return counts
 
 
@@ -335,6 +405,7 @@ def main(argv: Iterable[str] | None = None) -> int:
         news_json=args.news,
         db_path=args.db,
         classify=not args.no_classify,
+        print_summary=True,
     )
     print(json.dumps(counts, indent=2))
     return 0

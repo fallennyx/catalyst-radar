@@ -72,9 +72,23 @@ match one of the buckets in [`config.ASSET_CLASSES`](./radar/config.py).
 ]
 ```
 
-**Sourcing historical data:**
-- *Bars:* any OHLCV provider (Coinalyze paid, CoinGecko free, yfinance for equities, EIA for commodities). Aggregate to hourly and dump into the CSV format above.
-- *News:* this is the hard part. RSS feeds aren't queryable historically. Options: GDELT (free, full-history, broad coverage but noisy), yfinance (~30 days), EDGAR (full filings history), or a paid news archive. Without news, you can still validate the ranker, BTC-beta gate, and suppression chain — just omit `--news` and pass `--no-classify`.
+**Sourcing historical bars (built-in fetcher):**
+
+```bash
+# Pull the last 7 days of hourly bars for the full universe → data/bars.csv
+python -m radar.fetch_bars --days 7
+
+# Or a subset:
+python -m radar.fetch_bars --tickers BTC,ETH,ARB --days 14 --out data/btc_eth_arb.csv
+```
+
+The fetcher routes by asset class:
+- *crypto* → CoinGecko `/market_chart/range` (free, no API key, ~90-day hourly window)
+- *equity / commodity* → yfinance `1h` bars (free, ~30-60-day intraday window; commodity tickers are auto-mapped to futures contracts: `WTI` → `CL=F`, `XAU` → `GC=F`, …)
+
+Open interest and funding aren't available from these free sources — they're written as 0 in the CSV. The ranker tolerates missing OI/funding (those z-score components contribute 0).
+
+**Sourcing historical news:** this is the hard part. RSS feeds aren't queryable historically. Options: GDELT (free, full-history, broad coverage but noisy), yfinance (~30 days), EDGAR (full filings history), or a paid news archive. Without news, you can still validate the ranker, BTC-beta gate, and suppression chain — just omit `--news` and pass `--no-classify`.
 
 **Programmatic API:**
 
