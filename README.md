@@ -39,6 +39,55 @@ pip install -e ".[dev]"
 pytest tests/
 ```
 
+## Replay against historical data
+
+`radar/replay.py` walks the engine through historical bars hour-by-hour without
+touching Lighter, RSS, or Telegram. It uses a separate SQLite DB (`data/replay.db`
+by default, wiped on each run) so production state stays untouched.
+
+```bash
+# Run against the bundled sample (one trading day, 3 tickers, 4 news items):
+python -m radar.replay --bars data/sample_bars.csv \
+                       --news data/sample_news_archive.json \
+                       --no-classify
+# → {"cycles": 14, "emitted": 2, "dropped": 0}
+```
+
+**Bars CSV format** — hourly snapshots (one row per ticker per hour):
+
+```
+ts,ticker,asset_class,max_leverage,price,volume_24h_usd,oi_usd,funding_1h,pct_24h,pct_1h
+2024-01-15T11:00:00Z,ARB,crypto_t2,10,2.10,250000000,260000000,0.00045,12.5,11.70
+```
+
+`ts` accepts either ISO-8601 with `Z` or unix integers. `asset_class` must
+match one of the buckets in [`config.ASSET_CLASSES`](./radar/config.py).
+
+**News archive JSON format** — flat list:
+
+```json
+[
+  {"ticker": "ARB", "source": "DefiLlama", "title": "...",
+   "body": "...", "url": "...", "published": "2024-01-15T10:30:00Z"}
+]
+```
+
+**Sourcing historical data:**
+- *Bars:* any OHLCV provider (Coinalyze paid, CoinGecko free, yfinance for equities, EIA for commodities). Aggregate to hourly and dump into the CSV format above.
+- *News:* this is the hard part. RSS feeds aren't queryable historically. Options: GDELT (free, full-history, broad coverage but noisy), yfinance (~30 days), EDGAR (full filings history), or a paid news archive. Without news, you can still validate the ranker, BTC-beta gate, and suppression chain — just omit `--news` and pass `--no-classify`.
+
+**Programmatic API:**
+
+```python
+from radar.replay import replay
+counts = replay(
+    bars_csv="my_bars.csv",
+    news_json="my_news.json",
+    classify=True,           # set False to skip Anthropic API spend
+    emit_fn=lambda alert, classification: print(alert.ticker, alert.score),
+)
+```
+
 ## Tuning
 
 All knobs live in [`radar/config.py`](./radar/config.py): asset universe,

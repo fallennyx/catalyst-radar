@@ -1,0 +1,34 @@
+[
+  {
+    "ticker": "ARB",
+    "source": "DefiLlama",
+    "title": "ARB token unlock scheduled 2024-01-16",
+    "body": "Approximately 92.65M ARB tokens (~2.5% of supply) unlock on January 16, increasing near-term sell pressure on the market.",
+    "url": "https://defillama.com/unlocks/arb",
+    "published": "2024-01-15T10:30:00Z"
+  },
+  {
+    "ticker": "ARB",
+    "source": "CoinDesk",
+    "title": "Arbitrum announces major partnership with Robinhood",
+    "body": "Arbitrum announced today that Robinhood will integrate the Arbitrum L2 for low-cost token transfers, marking a significant expansion of L2 retail adoption.",
+    "url": "https://www.coindesk.com/arbitrum-robinhood",
+    "published": "2024-01-15T11:00:00Z"
+  },
+  {
+    "ticker": "BTC",
+    "source": "Reuters",
+    "title": "SEC approves spot Bitcoin ETF applications from BlackRock and Fidelity",
+    "body": "The U.S. Securities and Exchange Commission approved spot Bitcoin ETF applications from BlackRock and Fidelity on Monday, opening direct institutional access to the asset.",
+    "url": "https://reuters.com/btc-etf-approval",
+    "published": "2024-01-15T12:55:00Z"
+  },
+  {
+    "ticker": "ETH",
+    "source": "The Block",
+    "title": "Markets quiet ahead of Fed meeting",
+    "body": "Trading volumes were muted across major risk assets, with traders awaiting the FOMC decision later this week.",
+    "url": "https://theblock.co/eth-quiet",
+    "published": "2024-01-15T08:00:00Z"
+  }
+]

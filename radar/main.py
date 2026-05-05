@@ -29,7 +29,7 @@ def _setup_logging() -> None:
     )
 
 
-def _build_history(ticker: str) -> dict[str, list[float]]:
+def build_history(ticker: str) -> dict[str, list[float]]:
     """Pull rolling 1h bars and assemble the arrays the ranker/beta want."""
     rows = storage.recent_bars(ticker, hours=config.ROLLING_WINDOW_DAYS * 24)
     if not rows:
@@ -48,7 +48,7 @@ def _build_history(ticker: str) -> dict[str, list[float]]:
     }
 
 
-def _btc_history() -> list[float]:
+def btc_history() -> list[float]:
     rows = storage.recent_bars("BTC", hours=config.ROLLING_WINDOW_DAYS * 24)
     closes = [r["close"] for r in rows if r["close"] is not None]
     rets = []
@@ -83,11 +83,11 @@ def cycle() -> None:
         try:
             storage.upsert_market_state(m)
             _record_market_bar(m)
-            histories[m.ticker] = _build_history(m.ticker)
+            histories[m.ticker] = build_history(m.ticker)
         except Exception as e:
             log.warning("snapshot failed for %s: %s", m.ticker, e)
 
-    btc_rets = _btc_history()
+    btc_rets = btc_history()
 
     candidates = ranker.top_n_movers(markets, histories=histories)
     log.info("cycle: %d top movers", len(candidates))

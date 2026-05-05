@@ -76,7 +76,16 @@ CREATE INDEX IF NOT EXISTS idx_alerts_decision_time ON alerts(decision, created_
 
 
 def _now() -> int:
+    """Wall-clock seconds. Reassign this attribute (or call set_clock) to inject
+    a virtual clock — the replay harness does this to drive the engine through
+    historical timestamps."""
     return int(time.time())
+
+
+def set_clock(fn) -> None:
+    """Override the module's clock. Pass `None` to restore the default."""
+    global _now
+    _now = fn if fn is not None else (lambda: int(time.time()))
 
 
 @contextmanager
@@ -222,7 +231,8 @@ def alerts_today_count(
     db_path: str | None = None,
 ) -> int:
     """Count alerts emitted since the start of the current UTC day."""
-    today_start = int(time.time()) - (int(time.time()) % 86400)
+    now = _now()
+    today_start = now - (now % 86400)
     with _conn(db_path) as cx:
         cur = cx.execute(
             "SELECT COUNT(*) AS c FROM alerts "
@@ -237,7 +247,8 @@ def asset_class_alerts_today(
     decision: str = "EMIT",
     db_path: str | None = None,
 ) -> int:
-    today_start = int(time.time()) - (int(time.time()) % 86400)
+    now = _now()
+    today_start = now - (now % 86400)
     with _conn(db_path) as cx:
         cur = cx.execute(
             "SELECT COUNT(*) AS c FROM alerts "
