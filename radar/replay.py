@@ -354,8 +354,16 @@ def replay(
                     score=score,
                     alpha_z=alpha_z,
                     r_alpha_pct=r_alpha_pct,
+                    classifier_result=cls,
                 )
-                decision, reason = suppression.evaluate(alert)
+                # The new evaluate signature wants Bar-shaped history. Pull
+                # it from the replay DB (recent_bars now returns list[Bar]).
+                bar_history = storage.recent_bars(
+                    market.ticker, hours=config.SWING_LOOKBACK_HOURS * 2,
+                    db_path=db_path,
+                )
+                decision, reason, _metadata = suppression.evaluate(market, alert, bar_history)
+                # WATCHLIST decisions are recorded but don't fire — neither emitted nor dropped.
                 storage.record_alert(alert, decision=decision, reason=reason,
                                      classifier=cls, db_path=db_path)
                 if decision == "EMIT":
@@ -366,7 +374,7 @@ def replay(
                         log.warning("emit handler raised: %s", e)
                 else:
                     counts["dropped"] += 1
-                    log.debug("DROP %s: %s", market.ticker, reason)
+                    log.debug("%s %s: %s", decision, market.ticker, reason)
     finally:
         storage.set_clock(None)
         config.DB_PATH = original_db_path

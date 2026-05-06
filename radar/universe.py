@@ -164,3 +164,19 @@ def get_leveraged_universe(force: bool = False) -> list[Market]:
     _CACHE["markets"] = markets
     log.info("universe: %d leveraged markets", len(markets))
     return list(markets)
+
+
+def get_market_snapshot(ticker: str) -> Market | None:
+    """Fetch live state for a single ticker. Used by Tier 2 polling.
+
+    Lighter's SDK doesn't expose a single-ticker accessor consistently across
+    versions, so we fall back to filtering the (60s-cached) full universe.
+    Cheap on the hot path because the cache hit is the common case."""
+    if not ticker:
+        return None
+    universe = get_leveraged_universe()
+    needle = ticker.upper().strip()
+    for m in universe:
+        if m.ticker == needle:
+            return m
+    return None

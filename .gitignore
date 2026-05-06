@@ -19,6 +19,11 @@ data/*.db
 data/*.db-journal
 data/*.db-wal
 data/*.db-shm
+data/bars.csv
+data/bars_*.csv
+data/news_archive.json
+!data/sample_bars.csv
+!data/sample_news_archive.json
 
 # OS / editor
 .DS_Store
