@@ -80,6 +80,7 @@ SWING_LOOKBACK_HOURS = 48           # how far back to scan for prior swings
 SWING_MIN_AGE_HOURS = 4             # ignore swings inside the most recent N hours
 SWING_MIN_BARS_VALIDATION = 3       # swing must be unbroken for >= N subsequent bars
 RANGE_EXPANSION_MULTIPLIER = 1.5    # current bar range vs median of lookback
+IMPULSE_BYPASS_MULTIPLIER = 2.5     # if current bar range > N x median, bypass BTC-beta gate
 WATCHLIST_SCORE_THRESHOLD = 60      # min score to enter watchlist if no BOS yet
 WATCHLIST_TTL_HOURS = 72            # auto-expire stale watchlist entries (72h, not 24h, to capture multi-day catalyst arcs like TON)
 REQUIRE_DIRECTION_AGREEMENT = True  # BOS direction must match LLM direction

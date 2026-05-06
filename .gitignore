@@ -21,6 +21,10 @@ data/*.db-wal
 data/*.db-shm
 data/bars.csv
 data/bars_*.csv
+data/march_bars.csv
+data/may_bars.csv
+data/*_bars.csv
+data/*_news.json
 data/news_archive.json
 !data/sample_bars.csv
 !data/sample_news_archive.json

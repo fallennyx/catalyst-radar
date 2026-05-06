@@ -82,6 +82,85 @@ def test_fetch_crypto_returns_empty_on_http_error(monkeypatch):
     assert rows == []
 
 
+# ---------- Binance ----------
+
+def _binance_klines(num: int = 3, base_ts_ms: int = 1_705_276_800_000):
+    """num hourly klines: each is [open_time_ms, o, h, l, c, vol, close_time, quote_vol, ...]"""
+    return [
+        [
+            base_ts_ms + i * 3_600_000,
+            f"{100.0 + i:.2f}",       # open
+            f"{105.0 + i:.2f}",       # high
+            f"{99.0 + i:.2f}",        # low
+            f"{102.0 + i:.2f}",       # close
+            f"{1000.0 * (i+1):.2f}",  # base volume
+            base_ts_ms + (i + 1) * 3_600_000 - 1,  # close_time
+            f"{102_000.0 * (i+1):.2f}",  # quote volume (USDT)
+            500,                       # trades
+            "0", "0", "0",
+        ]
+        for i in range(num)
+    ]
+
+
+def test_fetch_crypto_binance_parses_klines(monkeypatch):
+    monkeypatch.setattr(
+        fetch_bars, "_session",
+        lambda: _mock_session(_binance_klines(3)),
+    )
+    rows = fetch_bars.fetch_crypto_binance("BTC", days=1)
+    assert len(rows) == 3
+    # Real OHLC, not synthesized
+    assert rows[0]["open"] == 100.0
+    assert rows[0]["high"] == 105.0
+    assert rows[0]["low"] == 99.0
+    assert rows[0]["price"] == 102.0
+    assert rows[0]["asset_class"] == "crypto_t1"
+
+
+def test_fetch_crypto_binance_uses_symbol_override(monkeypatch):
+    sess = _mock_session(_binance_klines(2))
+    monkeypatch.setattr(fetch_bars, "_session", lambda: sess)
+    fetch_bars.fetch_crypto_binance("PEPE", days=1)
+    _, kwargs = sess.get.call_args
+    assert kwargs["params"]["symbol"] == "1000PEPEUSDT"
+
+
+def test_fetch_crypto_binance_returns_empty_for_unmapped(monkeypatch):
+    sess = MagicMock()
+    monkeypatch.setattr(fetch_bars, "_session", lambda: sess)
+    rows = fetch_bars.fetch_crypto_binance("HYPE", days=1)  # HYPE isn't on Binance
+    assert rows == []
+    sess.get.assert_not_called()
+
+
+def test_fetch_crypto_router_prefers_binance(monkeypatch):
+    """fetch_crypto should use Binance when symbol exists; fall back otherwise."""
+    binance_calls, coingecko_calls = [], []
+    monkeypatch.setattr(fetch_bars, "fetch_crypto_binance",
+                        lambda t, d, end_ts=None: binance_calls.append(t) or [{"ticker": t}])
+    monkeypatch.setattr(fetch_bars, "fetch_crypto_hourly",
+                        lambda t, d, end_ts=None: coingecko_calls.append(t) or [{"ticker": t}])
+
+    fetch_bars.fetch_crypto("BTC", days=1)
+    assert binance_calls == ["BTC"]
+    assert coingecko_calls == []
+
+
+def test_fetch_crypto_router_falls_back_to_coingecko(monkeypatch):
+    """When Binance returns nothing (or ticker isn't on Binance), use CoinGecko."""
+    binance_calls, coingecko_calls = [], []
+    monkeypatch.setattr(fetch_bars, "fetch_crypto_binance",
+                        lambda t, d, end_ts=None: binance_calls.append(t) or [])
+    monkeypatch.setattr(fetch_bars, "fetch_crypto_hourly",
+                        lambda t, d, end_ts=None: coingecko_calls.append(t) or [{"ticker": t}])
+
+    # HYPE isn't in BINANCE_SYMBOLS → router skips Binance entirely
+    fetch_bars.fetch_crypto("HYPE", days=1)
+    assert binance_calls == []
+    assert coingecko_calls == ["HYPE"]
+
+
 # ---------- yfinance ----------
 
 class _FakeIndexEntry:
@@ -150,9 +229,9 @@ def test_fetch_yfinance_uses_symbol_override(monkeypatch):
 def test_fetch_universe_routes_by_class(monkeypatch):
     crypto_calls, equity_calls = [], []
     monkeypatch.setattr(fetch_bars, "fetch_crypto_hourly",
-                        lambda t, d: crypto_calls.append(t) or [])
+                        lambda t, d, end_ts=None: crypto_calls.append(t) or [])
     monkeypatch.setattr(fetch_bars, "fetch_yfinance_hourly",
-                        lambda t, d: equity_calls.append(t) or [])
+                        lambda t, d, end_ts=None: equity_calls.append(t) or [])
     fetch_bars.ROUTES["crypto_t1"] = fetch_bars.fetch_crypto_hourly
     fetch_bars.ROUTES["crypto_t2"] = fetch_bars.fetch_crypto_hourly
     fetch_bars.ROUTES["crypto_meme"] = fetch_bars.fetch_crypto_hourly
@@ -166,7 +245,7 @@ def test_fetch_universe_routes_by_class(monkeypatch):
 
 
 def test_fetch_universe_skips_unknown_ticker(monkeypatch):
-    monkeypatch.setattr(fetch_bars, "fetch_crypto_hourly", lambda t, d: [])
+    monkeypatch.setattr(fetch_bars, "fetch_crypto_hourly", lambda t, d, end_ts=None: [])
     rows = fetch_bars.fetch_universe(["NOT_A_REAL_TICKER"], days=1, sleep_between=0)
     assert rows == []
 

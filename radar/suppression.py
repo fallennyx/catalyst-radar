@@ -168,14 +168,19 @@ def evaluate(
         return ("DROP", "dedup_4h", metadata)
 
     # ---- Rule 2: BTC-beta gate (crypto only) ----
+    # Bypass when the current bar range is a high-conviction impulse — a
+    # >2.5x range break is a genuine move regardless of BTC correlation, and
+    # filtering it out costs us first-leg breakouts (the engine's main weakness
+    # before this carve-out: it only caught continuation breaks after the
+    # 24h-pct move had grown past R_ALPHA_MIN_PCT).
     if _is_crypto(market.asset_class):
-        # Re-run beta against the closed-bar history shape that beta wants.
-        # `history` here is a list[Bar] so we project closes → returns inline.
-        rets, btc_rets = _crypto_returns_from_history(market, history)
-        alpha_z, r_alpha = beta.compute_alpha_z(market, {"ret_1h": rets, "btc_ret_1h": btc_rets})
-        # Per spec: drop if EITHER is weak. Stricter than the legacy AND gate.
-        if abs(alpha_z) < config.ALPHA_Z_MIN or abs(r_alpha) < config.R_ALPHA_MIN_PCT:
-            return ("DROP", "pure_btc_beta", metadata)
+        is_impulse = _is_impulse_break(history, median_range)
+        if not is_impulse:
+            rets, btc_rets = _crypto_returns_from_history(market, history)
+            alpha_z, r_alpha = beta.compute_alpha_z(market, {"ret_1h": rets, "btc_ret_1h": btc_rets})
+            # Per spec: drop if EITHER is weak. Stricter than the legacy AND gate.
+            if abs(alpha_z) < config.ALPHA_Z_MIN or abs(r_alpha) < config.R_ALPHA_MIN_PCT:
+                return ("DROP", "pure_btc_beta", metadata)
 
     # ---- Rule 3: sector-day clustering ----
     if storage.count_same_sector_alerts(market.asset_class, hours=config.DEDUP_HOURS) >= config.SECTOR_DAY_THRESHOLD:
@@ -188,6 +193,17 @@ def evaluate(
             return ("DROP", "budget_throttle", metadata)
 
     return ("EMIT", "ok", metadata)
+
+
+def _is_impulse_break(history: list, median_range: float | None) -> bool:
+    """True if the in-progress bar's range is a high-conviction impulse — i.e.
+    significantly wider than the BOS minimum (1.5x). When True we trust the
+    structural break enough to bypass the BTC-beta correlation filter."""
+    if not history or median_range is None or median_range <= 0:
+        return False
+    cur = history[-1]
+    cur_range = float((cur.high or 0.0) - (cur.low or 0.0))
+    return cur_range > config.IMPULSE_BYPASS_MULTIPLIER * float(median_range)
 
 
 def _crypto_returns_from_history(market: Any, history: list) -> tuple[list[float], list[float]]:

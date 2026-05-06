@@ -88,7 +88,11 @@ def _safe_float(v: Any, default: float = 0.0) -> float:
 # ============ loaders ============
 
 def load_bars(path: str | Path) -> dict[int, list[Market]]:
-    """Returns dict mapping floored-hourly ts → list of Market snapshots at that ts."""
+    """Returns dict mapping floored-hourly ts → list of Market snapshots at that ts.
+
+    The bar's open/high/low (when present in the CSV) are stashed on
+    ``Market.raw['open' | 'high' | 'low']`` so the replay loop can pass them
+    through to ``storage.insert_bar``. The new BOS engine needs real OHLC."""
     out: dict[int, list[Market]] = defaultdict(list)
     with open(path, newline="") as f:
         reader = csv.DictReader(f)
@@ -103,17 +107,24 @@ def load_bars(path: str | Path) -> dict[int, list[Market]]:
             if asset_class not in config.SYMBOL_TO_CLASS.values():
                 log.warning("row %s: unknown asset_class %r — skipping", ticker, asset_class)
                 continue
+            close = _safe_float(row.get("price"))
+            ohlc_raw = {
+                "open": _safe_float(row.get("open")) or close,
+                "high": _safe_float(row.get("high")) or close,
+                "low": _safe_float(row.get("low")) or close,
+            }
             m = Market(
                 ticker=ticker,
                 asset_class=asset_class,
                 market_id=ticker,
                 max_leverage=_safe_float(row.get("max_leverage"), 1.0) or 1.0,
-                price=_safe_float(row.get("price")),
+                price=close,
                 volume_24h_usd=_safe_float(row.get("volume_24h_usd")),
                 oi_usd=_safe_float(row.get("oi_usd")),
                 funding_1h=_safe_float(row.get("funding_1h")),
                 pct_24h=_safe_float(row.get("pct_24h")),
                 pct_1h=_safe_float(row.get("pct_1h")),
+                raw=ohlc_raw,
             )
             out[ts].append(m)
     return dict(out)
@@ -327,8 +338,12 @@ def replay(
 
             for m in markets:
                 storage.upsert_market_state(m, db_path=db_path)
+                ohlc = m.raw or {}
                 storage.insert_bar(
                     ticker=m.ticker, ts=ts,
+                    open_=ohlc.get("open"),
+                    high=ohlc.get("high"),
+                    low=ohlc.get("low"),
                     close=m.price, volume=m.volume_24h_usd,
                     oi=m.oi_usd, funding=m.funding_1h,
                     db_path=db_path,

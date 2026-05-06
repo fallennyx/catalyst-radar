@@ -241,13 +241,82 @@ def test_dedup_4h_does_not_block_different_catalyst_type(tmp_db):
 
 
 def test_btc_beta_drops_low_alpha_crypto(tmp_db):
-    """Crypto with weak alpha_z → DROP under the new OR gate."""
-    market = _market("ETH", asset_class="crypto_t1", price=370.0)
+    """Crypto with weak alpha_z → DROP under the new OR gate (moderate break only)."""
+    market = _market("ETH", asset_class="crypto_t1", price=103.5)
     alert = _alert("ETH", asset_class="crypto_t1",
                    alpha_z=0.5, r_alpha_pct=1.0, direction="long")
-    history = _bos_history_long_break(price_above=370.0)
+    # Use the moderate-break fixture so the impulse bypass doesn't fire
+    history = _bos_history_moderate_break(price_above=103.5)
 
     # Patch beta.compute_alpha_z so we don't depend on real returns
+    with patch("radar.suppression.beta.compute_alpha_z", return_value=(0.5, 1.0)):
+        decision, reason, _ = suppression.evaluate(market, alert, history)
+    assert decision == "DROP"
+    assert reason == "pure_btc_beta"
+
+
+def _bos_history_moderate_break(price_above: float = 103.5):
+    """In-progress bar breaks the swing high with range between 1.5x and 2.5x
+    median — passes BOS but does NOT trigger the impulse bypass."""
+    from radar.storage import Bar
+    bars: list[Bar] = []
+    for i in range(60):
+        if i == 20:
+            bars.append(Bar(ticker="X", ts=i * 3600, high=100.0, low=99.0,
+                            close=99.5, volume=0, oi=0, funding=0))
+        else:
+            bars.append(Bar(ticker="X", ts=i * 3600, high=92.0, low=90.0,
+                            close=91.0, volume=0, oi=0, funding=0))
+    # range = price_above - 99.5 ≈ 4 when price_above=103.5
+    # median = 2 → 2.0x (clears BOS at 1.5x, below impulse at 2.5x)
+    bars[-1] = Bar(ticker="X", ts=59 * 3600, open=99.5, high=price_above,
+                   low=99.5, close=price_above, volume=0, oi=0, funding=0)
+    return bars
+
+
+def _bos_history_impulse_break(price_above: float = 110.0):
+    """History where the in-progress bar is a HUGE impulse (range >> median)."""
+    from radar.storage import Bar
+    bars: list[Bar] = []
+    for i in range(60):
+        if i == 20:
+            bars.append(Bar(ticker="X", ts=i * 3600, high=100.0, low=99.0,
+                            close=99.5, volume=0, oi=0, funding=0))
+        else:
+            bars.append(Bar(ticker="X", ts=i * 3600, high=92.0, low=91.5,
+                            close=91.8, volume=0, oi=0, funding=0))
+    # in-progress bar with HUGE range (5 wide vs ~0.5 median) — clear impulse
+    bars[-1] = Bar(ticker="X", ts=59 * 3600, open=91.0, high=price_above,
+                   low=91.0, close=price_above, volume=0, oi=0, funding=0)
+    return bars
+
+
+def test_btc_beta_bypassed_on_impulse_break(tmp_db):
+    """A high-conviction impulse (>2.5x median range) bypasses the BTC-beta gate.
+
+    This is the carve-out that lets the engine catch FIRST-leg breakouts —
+    previously it only fired on continuation breaks once 24h-pct had grown
+    past R_ALPHA_MIN_PCT.
+    """
+    market = _market("ETH", asset_class="crypto_t1", price=110.0)
+    alert = _alert("ETH", asset_class="crypto_t1",
+                   alpha_z=0.5, r_alpha_pct=1.0, direction="long")
+    # Even with BTC-beta returning weak values, the impulse should bypass
+    history = _bos_history_impulse_break(price_above=110.0)
+
+    with patch("radar.suppression.beta.compute_alpha_z", return_value=(0.5, 1.0)):
+        decision, reason, _ = suppression.evaluate(market, alert, history)
+    assert decision == "EMIT"
+    assert reason == "ok"
+
+
+def test_btc_beta_still_drops_normal_break_with_weak_alpha(tmp_db):
+    """A non-impulse BOS (just barely 1.5x median) still gets the BTC-beta filter."""
+    market = _market("ETH", asset_class="crypto_t1", price=103.5)
+    alert = _alert("ETH", asset_class="crypto_t1",
+                   alpha_z=0.5, r_alpha_pct=1.0, direction="long")
+    history = _bos_history_moderate_break(price_above=103.5)
+
     with patch("radar.suppression.beta.compute_alpha_z", return_value=(0.5, 1.0)):
         decision, reason, _ = suppression.evaluate(market, alert, history)
     assert decision == "DROP"
