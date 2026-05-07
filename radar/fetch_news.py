@@ -168,6 +168,10 @@ def _build_query(ticker: str, domain_whitelist: Iterable[str] | None) -> str | N
     base = QUERY_TERMS.get(ticker.upper())
     if not base:
         return None
+    # GDELT requires bare OR-groups to be parenthesized. If the base is just
+    # "X" OR "Y" with no existing paren structure, wrap it.
+    if " OR " in base and "(" not in base:
+        base = f"({base})"
     parts = [base]
     if domain_whitelist:
         domain_clause = " OR ".join(f"domain:{d}" for d in domain_whitelist)

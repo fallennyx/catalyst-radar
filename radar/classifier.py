@@ -16,7 +16,7 @@ import logging
 import os
 from typing import Any, Iterable
 
-from pydantic import BaseModel, Field, ValidationError, field_validator
+from pydantic import BaseModel, Field, ValidationError, field_validator, model_validator
 
 from . import config
 from .catalysts import NewsItem
@@ -54,6 +54,16 @@ class ClassifierResult(BaseModel):
     evidence_quotes: list[str] = Field(default_factory=list)
     is_actionable: bool = True
 
+    # ---- BOS filter additions (all optional, sensible defaults) ----
+    # The Haiku classifier doesn't necessarily emit these yet. They exist so
+    # downstream consumers (telegram, suppression) can read them uniformly.
+    alert_priority: str = "NORMAL"      # "NORMAL" | "SUPPRESS" | "WATCHLIST"
+    primary_catalyst: str | None = None  # plain-English headline. defaults to summary
+    conviction: float | None = None      # [0, 1]. defaults to confidence
+    horizon: str = "unknown"             # "intraday" | "swing" | "multiweek" | "unknown"
+    continuation_thesis: str | None = None
+    kill_signal: str = ""                # what would invalidate the thesis
+
     @field_validator("catalyst_type")
     @classmethod
     def _ct(cls, v: str) -> str:
@@ -69,6 +79,17 @@ class ClassifierResult(BaseModel):
         if v not in VALID_DIRECTIONS:
             return "neutral"
         return v
+
+    @model_validator(mode="after")
+    def _fill_bos_defaults(self):
+        """Default BOS fields from the legacy fields when they're not supplied."""
+        if not self.primary_catalyst:
+            self.primary_catalyst = self.summary
+        if self.conviction is None:
+            self.conviction = self.confidence
+        if not self.continuation_thesis:
+            self.continuation_thesis = self.summary
+        return self
 
 
 # ============ tool spec for Anthropic ============

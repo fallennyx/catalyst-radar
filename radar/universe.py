@@ -1,5 +1,6 @@
-"""Leveraged-universe loader. Pulls markets from Lighter SDK, filters to
-leveraged perps, normalizes tickers, and returns a list of `Market` records.
+"""Leveraged-universe loader. Pulls the live Lighter DEX market list (single
+source of truth) and returns a list of `Market` records. Anything not active
+on Lighter is invisible to the engine.
 
 Cached for 60 seconds so the main loop can call this freely.
 """
@@ -12,7 +13,7 @@ import time
 from dataclasses import dataclass, field
 from typing import Any
 
-from . import config
+from . import config, lighter
 
 log = logging.getLogger(__name__)
 
@@ -139,28 +140,54 @@ def _fetch_lighter_markets() -> list[dict[str, Any]]:
 
 
 def get_leveraged_universe(force: bool = False) -> list[Market]:
-    """Return the current leveraged universe, cached for 60s.
+    """Return the current leveraged universe — every active perp on Lighter.
 
-    Falls back to an empty list (not an exception) when Lighter is unreachable;
-    the main loop logs and sleeps rather than dying.
+    Each market's asset_class is auto-classified by `lighter.classify()`.
+    Price/volume/OI/funding are filled where the Lighter API exposes them
+    (most are 0 from the orderBooks endpoint; the discovery scan refreshes
+    them via `get_market_snapshot`).
+
+    Falls back to the cached value (possibly empty) on API failure — the
+    main loop logs and sleeps rather than crashing.
     """
     now = time.time()
     if not force and (now - _CACHE["ts"]) < _CACHE_TTL_SEC and _CACHE["markets"]:
         return list(_CACHE["markets"])
 
-    raw_markets = _fetch_lighter_markets()
+    lighter_markets = lighter.fetch_universe(force=force)
     markets: list[Market] = []
-    for raw in raw_markets:
-        if not isinstance(raw, dict):
-            try:
-                raw = dict(raw)  # type: ignore[arg-type]
-            except Exception:
-                continue
-        m = _market_from_raw(raw)
-        if m is not None:
-            markets.append(m)
+    for lm in lighter_markets:
+        markets.append(Market(
+            ticker=lm.symbol,
+            asset_class=lm.asset_class,
+            market_id=str(lm.market_id),
+            max_leverage=10.0,  # Lighter perps are always leveraged; orderBooks doesn't expose max
+            price=0.0,
+            volume_24h_usd=0.0,
+            oi_usd=0.0,
+            funding_1h=0.0,
+            pct_24h=0.0,
+            pct_1h=0.0,
+            raw=lm.raw or {},
+        ))
 
     _CACHE["ts"] = now
     _CACHE["markets"] = markets
-    log.info("universe: %d leveraged markets", len(markets))
+    log.info("universe: %d Lighter perps", len(markets))
     return list(markets)
+
+
+def get_market_snapshot(ticker: str) -> Market | None:
+    """Fetch live state for a single ticker. Used by Tier 2 polling.
+
+    Lighter's SDK doesn't expose a single-ticker accessor consistently across
+    versions, so we fall back to filtering the (60s-cached) full universe.
+    Cheap on the hot path because the cache hit is the common case."""
+    if not ticker:
+        return None
+    universe = get_leveraged_universe()
+    needle = ticker.upper().strip()
+    for m in universe:
+        if m.ticker == needle:
+            return m
+    return None

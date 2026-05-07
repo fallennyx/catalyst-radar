@@ -87,34 +87,44 @@ def test_replay_runs_end_to_end_on_sample(tmp_path):
         classify=False,
     )
     assert counts["cycles"] >= 10
+    # Under the BOS gate, the 14-hour sample lacks enough history for swing
+    # detection — most candidates drop with `no_structure_break`. We just
+    # assert the loop ran end-to-end and the alerts table got populated.
     assert counts["emitted"] + counts["dropped"] >= 1
-    # the ARB pump and BTC ETF spikes both clear the cold-start threshold
-    assert counts["emitted"] >= 1
-    # replay DB exists and has alert rows
     rows = storage.execute("SELECT ticker, decision FROM alerts", db_path=str(db))
     assert len(rows) >= 1
 
 
 def test_replay_uses_virtual_clock(tmp_path):
     """Inside the replay loop, storage._now() must return historical timestamps."""
-    captured = []
+    db = tmp_path / "vc.db"
+    captured_now: list[int] = []
 
-    def emit(alert: Alert, classification):
-        captured.append((alert.ticker, storage._now()))
+    # Hook into upsert_market_state which is called every cycle — captures the
+    # virtual clock value during the loop. This works whether or not anything
+    # actually EMITs (BOS may drop everything in the short sample).
+    original = storage.upsert_market_state
 
-    replay.replay(
-        bars_csv=SAMPLE_BARS,
-        news_json=SAMPLE_NEWS,
-        db_path=str(tmp_path / "vc.db"),
-        classify=False,
-        emit_fn=emit,
-    )
-    assert captured, "expected at least one emitted alert"
-    # all captured timestamps should fall on the sample-data day, not 'today'
+    def spy(market, db_path=None):
+        captured_now.append(storage._now())
+        return original(market, db_path=db_path)
+
+    storage.upsert_market_state = spy
+    try:
+        replay.replay(
+            bars_csv=SAMPLE_BARS,
+            news_json=SAMPLE_NEWS,
+            db_path=str(db),
+            classify=False,
+        )
+    finally:
+        storage.upsert_market_state = original
+
+    assert captured_now, "expected the cycle loop to run at least once"
     sample_day_start = 1_705_276_800  # 2024-01-15 00:00:00 UTC
     sample_day_end = sample_day_start + 86400
-    for ticker, ts in captured:
-        assert sample_day_start <= ts < sample_day_end, (ticker, ts)
+    for ts in captured_now:
+        assert sample_day_start <= ts < sample_day_end, ts
 
 
 def test_replay_restores_clock_after_run(tmp_path):
@@ -158,7 +168,8 @@ def test_replay_handles_empty_news(tmp_path):
 
 # ---------- summary ----------
 
-def test_summarize_returns_per_ticker_emit_counts(tmp_path):
+def test_summarize_returns_structured_breakdown(tmp_path):
+    """Summary helper returns a dict with the expected top-level keys."""
     db = tmp_path / "summary.db"
     replay.replay(
         bars_csv=SAMPLE_BARS,
@@ -167,10 +178,12 @@ def test_summarize_returns_per_ticker_emit_counts(tmp_path):
         classify=False,
     )
     summary = replay.summarize(str(db))
-    tickers = {row["ticker"] for row in summary["emitted_by_ticker"]}
-    # Both pumps in the sample data should appear
-    assert "ARB" in tickers
-    assert "BTC" in tickers
+    assert "emitted_by_ticker" in summary
+    assert "drops_by_rule" in summary
+    assert "catalysts" in summary
+    # Under BOS gating the short sample produces drops, not emits — so the
+    # drops_by_rule list should be non-empty.
+    assert len(summary["drops_by_rule"]) >= 1
 
 
 def test_summarize_groups_drop_reasons_by_rule(tmp_path):

@@ -1,9 +1,31 @@
 """Synthetic-data tests for the ranker."""
 
+from dataclasses import dataclass
+
 import numpy as np
 
 from radar import config, ranker
+from radar.storage import Bar
 from radar.universe import Market
+
+
+# ---------- BOS test helpers ----------
+
+def _bar(ts: int, high: float, low: float, close: float | None = None) -> Bar:
+    """Compact Bar factory used by the swing-detection tests."""
+    return Bar(
+        ticker="X", ts=ts,
+        open=close if close is not None else (high + low) / 2,
+        high=high, low=low,
+        close=close if close is not None else (high + low) / 2,
+        volume=0.0, oi=0.0, funding=0.0,
+    )
+
+
+def _flat_history(n: int, base_ts: int = 0, base: float = 90.0, range_: float = 1.0) -> list[Bar]:
+    """N flat bars at `base` price with constant `range_`."""
+    return [_bar(base_ts + i * 3600, high=base + range_ / 2, low=base - range_ / 2)
+            for i in range(n)]
 
 
 def _mk(ticker, asset_class, **kw):
@@ -99,3 +121,252 @@ def test_cold_start_passes_loud_meme_only_above_10pct():
     out_tickers = {m.ticker for m, _ in ranker.top_n_movers([nine, eleven])}
     assert "WIF" in out_tickers
     assert "PEPE" not in out_tickers
+
+
+# ============================================================================
+# BOS / swing-detection tests
+# ============================================================================
+
+def test_find_swing_high_clean_pivot():
+    """A clear pivot high at bar[20], all subsequent bars stay below it."""
+    bars: list[Bar] = []
+    for i in range(60):
+        if i == 20:
+            bars.append(_bar(ts=i * 3600, high=100.0, low=98.0))
+        else:
+            bars.append(_bar(ts=i * 3600, high=92.0, low=90.0))
+    swing = ranker.find_swing_high(
+        bars, lookback_hours=48, min_age_hours=4, min_bars_validation=3
+    )
+    assert swing is not None
+    assert swing.price == 100.0
+    assert swing.bars_validated >= 3
+
+
+def test_find_swing_high_broken_pivot():
+    """If the only candidate within lookback was broken, return None."""
+    bars: list[Bar] = []
+    for i in range(60):
+        if i == 20:
+            bars.append(_bar(ts=i * 3600, high=100.0, low=98.0))
+        elif i == 30:
+            bars.append(_bar(ts=i * 3600, high=105.0, low=103.0))  # broke 100
+        else:
+            bars.append(_bar(ts=i * 3600, high=92.0, low=90.0))
+    swing = ranker.find_swing_high(
+        bars, lookback_hours=48, min_age_hours=4, min_bars_validation=3
+    )
+    # 105 was at bar[30]; with min_age_hours=4, bar[30] is in the eligible window
+    # if the latest bar is past index 34. Latest index 59 → 30 < 59-4=55 → eligible.
+    # bar[30] is also unbroken by anything after → swing returns 105.
+    assert swing is not None
+    assert swing.price == 105.0
+
+
+def test_find_swing_high_excludes_in_progress_bar():
+    """Current in-progress bar's wick at $120 must NOT become the reference."""
+    bars: list[Bar] = []
+    for i in range(60):
+        bars.append(_bar(ts=i * 3600, high=92.0, low=90.0))
+    # mutate the LAST bar to a huge wick
+    bars[-1] = _bar(ts=59 * 3600, high=120.0, low=89.0, close=119.0)
+    swing = ranker.find_swing_high(
+        bars, lookback_hours=48, min_age_hours=4, min_bars_validation=3
+    )
+    # The in-progress bar (last one) is excluded from the eligible window AND
+    # excluded from the validation set. Earlier bars are all 92 → first valid
+    # candidate is some 92 high.
+    assert swing is not None
+    assert swing.price == 92.0
+
+
+def test_find_swing_high_insufficient_history():
+    bars = _flat_history(10)
+    swing = ranker.find_swing_high(bars, 48, 4, 3)
+    assert swing is None
+
+
+def test_has_breakout_structure_long_break_with_range_expansion():
+    """Stable history, prior swing high at 100, current bar wide-range above it."""
+    bars: list[Bar] = []
+    for i in range(60):
+        if i == 20:
+            bars.append(_bar(ts=i * 3600, high=100.0, low=99.0))
+        else:
+            bars.append(_bar(ts=i * 3600, high=92.0, low=90.0))
+    # current in-progress bar with wide range and price above 100
+    bars[-1] = _bar(ts=59 * 3600, high=103.0, low=99.0, close=102.5)
+    market = Market(ticker="TEST", asset_class="crypto_t1")
+    broke, direction, level = ranker.has_breakout_structure(
+        market, bars, current_price=103.0
+    )
+    assert broke is True
+    assert direction == "long"
+    assert level == 100.0
+
+
+def test_has_breakout_structure_long_break_without_range_expansion():
+    """Same setup but current bar range is normal — must NOT fire."""
+    bars: list[Bar] = []
+    for i in range(60):
+        if i == 20:
+            bars.append(_bar(ts=i * 3600, high=100.0, low=99.0))
+        else:
+            bars.append(_bar(ts=i * 3600, high=92.0, low=90.0))
+    bars[-1] = _bar(ts=59 * 3600, high=103.0, low=102.5, close=102.8)  # range 0.5
+    market = Market(ticker="TEST", asset_class="crypto_t1")
+    broke, direction, level = ranker.has_breakout_structure(
+        market, bars, current_price=103.0
+    )
+    assert broke is False
+    assert direction is None
+    assert level is None
+
+
+def test_has_breakout_structure_uses_live_price_over_close():
+    """history close at 99 (no break), current_price=103 → BOS fires."""
+    bars: list[Bar] = []
+    for i in range(60):
+        if i == 20:
+            bars.append(_bar(ts=i * 3600, high=100.0, low=99.0))
+        else:
+            bars.append(_bar(ts=i * 3600, high=92.0, low=90.0))
+    # in-progress bar wide range, but bar.close still at 99
+    bars[-1] = _bar(ts=59 * 3600, high=99.5, low=95.0, close=99.0)
+    market = Market(ticker="TEST", asset_class="crypto_t1")
+    broke, direction, level = ranker.has_breakout_structure(
+        market, bars, current_price=103.0
+    )
+    assert broke is True
+    assert direction == "long"
+    assert level == 100.0
+
+
+def test_check_breakout_against_stored_references_respects_direction_bias():
+    """Long-bias entry must NOT fire on a short-side break and vice versa."""
+    broke, direction, level = ranker.check_breakout_against_stored_references(
+        current_price=78.0,
+        current_bar_range=5.0,
+        swing_high_reference=100.0,
+        swing_low_reference=80.0,
+        median_bar_range=2.0,  # 5.0 / 2.0 = 2.5x → range expansion ON
+        direction_bias="long",
+    )
+    assert broke is False
+    assert direction is None
+    assert level is None
+
+    # Same setup but direction_bias="short" — short break is now valid
+    broke, direction, level = ranker.check_breakout_against_stored_references(
+        current_price=78.0,
+        current_bar_range=5.0,
+        swing_high_reference=100.0,
+        swing_low_reference=80.0,
+        median_bar_range=2.0,
+        direction_bias="short",
+    )
+    assert broke is True
+    assert direction == "short"
+    assert level == 80.0
+
+
+def test_check_breakout_against_stored_references_requires_range_expansion():
+    """Below the multiplier threshold, no break."""
+    broke, _, _ = ranker.check_breakout_against_stored_references(
+        current_price=110.0,
+        current_bar_range=2.5,  # 2.5 / 2.0 = 1.25x < 1.5x
+        swing_high_reference=100.0,
+        swing_low_reference=80.0,
+        median_bar_range=2.0,
+        direction_bias="long",
+    )
+    assert broke is False
+
+
+def test_check_breakout_zero_median_range_safe():
+    """Zero median (e.g. cold-start watchlist) must not trigger false breaks."""
+    broke, _, _ = ranker.check_breakout_against_stored_references(
+        current_price=200.0,
+        current_bar_range=10.0,
+        swing_high_reference=100.0,
+        swing_low_reference=None,
+        median_bar_range=0.0,
+        direction_bias="long",
+    )
+    assert broke is False
+
+
+def test_compute_median_range_basic():
+    bars = [
+        _bar(ts=0, high=10.0, low=8.0),   # range 2
+        _bar(ts=1, high=10.0, low=4.0),   # range 6
+        _bar(ts=2, high=10.0, low=6.0),   # range 4
+    ]
+    assert ranker.compute_median_range(bars) == 4.0
+
+
+def test_precompute_references_returns_zero_median_when_short():
+    bars = _flat_history(5)
+    sh, sl, ts, median = ranker.precompute_references_for_watchlist(
+        Market(ticker="X", asset_class="crypto_t1"), bars
+    )
+    # too-short history → no swings, but the function shouldn't crash
+    assert sh is None or isinstance(sh, float)
+    assert sl is None or isinstance(sl, float)
+    assert isinstance(median, float)
+
+
+# ---------- swing fallback (trending markets) ----------
+
+def test_find_swing_high_fallback_in_trending_market():
+    """When every candidate is broken by a sequential new high (uptrend),
+    the strict criterion fails. The fallback returns the absolute highest in
+    the eligible window so the engine still has a reference to break against.
+    """
+    bars: list[Bar] = []
+    # Sequentially-rising highs: bar i has high = 90 + i*0.5
+    # Each bar's high breaks the previous bar's high → strict logic finds
+    # nothing; fallback returns the highest bar in the eligible window.
+    for i in range(60):
+        h = 90.0 + i * 0.5
+        bars.append(_bar(ts=i * 3600, high=h, low=h - 0.4))
+    swing = ranker.find_swing_high(
+        bars, lookback_hours=48, min_age_hours=4, min_bars_validation=3
+    )
+    assert swing is not None
+    # Eligible window is bars[8:56] → highest is bar[55] with high=90+55*0.5=117.5
+    assert swing.price == 90.0 + 55 * 0.5
+    # Fallback signal: bars_validated=0 (strict requires >= min_bars_validation=3)
+    assert swing.bars_validated == 0
+
+
+def test_find_swing_high_strict_still_wins_when_clean():
+    """In a calm market with a clear unbroken pivot, strict logic should
+    still return that pivot (NOT the fallback)."""
+    bars: list[Bar] = []
+    for i in range(60):
+        if i == 20:
+            bars.append(_bar(ts=i * 3600, high=100.0, low=99.0))
+        else:
+            bars.append(_bar(ts=i * 3600, high=92.0, low=90.0))
+    swing = ranker.find_swing_high(
+        bars, lookback_hours=48, min_age_hours=4, min_bars_validation=3
+    )
+    assert swing is not None
+    assert swing.price == 100.0
+    # Strict pass returns >= min_bars_validation (3+)
+    assert swing.bars_validated >= 3
+
+
+def test_find_swing_low_fallback_in_downtrend():
+    bars: list[Bar] = []
+    for i in range(60):
+        l = 100.0 - i * 0.5
+        bars.append(_bar(ts=i * 3600, high=l + 0.4, low=l))
+    swing = ranker.find_swing_low(
+        bars, lookback_hours=48, min_age_hours=4, min_bars_validation=3
+    )
+    assert swing is not None
+    # Lowest in eligible window [8:56] is bar[55] with low=100-55*0.5=72.5
+    assert swing.price == 100.0 - 55 * 0.5
+    assert swing.bars_validated == 0

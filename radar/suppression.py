@@ -1,90 +1,231 @@
-"""Four-rule suppression chain.
+"""BOS-aware suppression chain.
 
-Rules evaluated in order; first match wins:
-  1. dedup_4h        — same ticker emitted within DEDUP_HOURS
-  2. btc_beta        — for crypto, |alpha_z| < ALPHA_Z_MIN AND |r_alpha_pct| < R_ALPHA_MIN_PCT
-  3. sector_day      — asset-class daily count already at SECTOR_DAY_THRESHOLD
-  4. budget_throttle — total daily emitted alerts at DAILY_ALERT_BUDGET
+Rules evaluated in order (first match wins). The signature is:
 
-Returns: ("DROP", reason) or ("EMIT", "ok").
+    evaluate(market, alert, history) -> tuple[decision, reason, metadata]
+
+where ``decision`` is one of ``"EMIT"``, ``"WATCHLIST"``, or ``"DROP"`` and
+``metadata`` carries the swing references / breakout level for downstream
+consumers (telegram payload, alerts log).
+
+Rules
+-----
+0. **Structural BOS check.**
+   - If structure broke at scan time AND direction agrees with the LLM bias,
+     remove any existing watchlist entry for the ticker and continue to
+     Rules 1-4 to gate the emit.
+   - If structure broke but direction disagrees → DROP (``structure_direction_conflict``).
+   - If structure didn't break:
+       * score >= ``WATCHLIST_SCORE_THRESHOLD`` → add to watchlist, return WATCHLIST.
+       * else → DROP (``no_structure_break``).
+1. **Per-catalyst dedup.** If an EMIT for this ticker + same catalyst_type
+   fired in the last 4h → DROP (``dedup_4h``).
+2. **BTC-beta gate (crypto only).** Drop if alpha_z OR r_alpha_pct fall
+   below their respective minima (see notes in BOS_FILTER_NOTES.md — this is
+   stricter than the legacy AND-gate).
+3. **Sector-day cluster.** If the asset_class has already emitted
+   ``SECTOR_DAY_THRESHOLD`` alerts in the last 4h, only the highest-scoring
+   new candidate breaks through.
+4. **Daily budget throttle.** Once daily emits hit ``DAILY_ALERT_BUDGET``,
+   only candidates above today's median EMIT score break through.
+
+Anything that survives all four gates returns ``("EMIT", "ok", metadata)``.
 """
 
 from __future__ import annotations
 
+import json
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
-from . import config, storage
+from . import beta, config, ranker, storage
 
 log = logging.getLogger(__name__)
 
 
 @dataclass
 class Alert:
-    """Lightweight alert payload for the suppression layer."""
+    """Lightweight alert payload threaded through the suppression chain.
+
+    ``classifier_result`` is the full pydantic ``ClassifierResult`` and is
+    required by the new BOS rules (we read direction, catalyst_type, etc.)
+    """
     ticker: str
     asset_class: str
     score: float
     alpha_z: float = 0.0
     r_alpha_pct: float = 0.0
+    classifier_result: Any | None = None
 
+
+# ---------- helpers ----------
 
 def _is_crypto(asset_class: str) -> bool:
     return asset_class.startswith("crypto")
 
 
-def _rule_dedup_4h(alert: Any) -> tuple[bool, str]:
-    rows = storage.recent_alerts_for_ticker(alert.ticker, config.DEDUP_HOURS)
-    for r in rows:
-        if r["decision"] == "EMIT":
-            return True, f"dedup_4h: emitted within {config.DEDUP_HOURS}h"
-    return False, ""
-
-
-def _rule_btc_beta(alert: Any) -> tuple[bool, str]:
-    if not _is_crypto(getattr(alert, "asset_class", "")):
-        return False, ""
-    az = abs(getattr(alert, "alpha_z", 0.0) or 0.0)
-    ra = abs(getattr(alert, "r_alpha_pct", 0.0) or 0.0)
-    if az < config.ALPHA_Z_MIN and ra < config.R_ALPHA_MIN_PCT:
-        return True, (
-            f"btc_beta: alpha_z={az:.2f}<{config.ALPHA_Z_MIN}, "
-            f"r_alpha_pct={ra:.2f}<{config.R_ALPHA_MIN_PCT}"
-        )
-    return False, ""
-
-
-def _rule_sector_day(alert: Any) -> tuple[bool, str]:
-    n = storage.asset_class_alerts_today(alert.asset_class, decision="EMIT")
-    if n >= config.SECTOR_DAY_THRESHOLD:
-        return True, f"sector_day: {alert.asset_class} already emitted {n} today"
-    return False, ""
-
-
-def _rule_budget_throttle(alert: Any) -> tuple[bool, str]:
-    n = storage.alerts_today_count(decision="EMIT")
-    if n >= config.DAILY_ALERT_BUDGET:
-        return True, f"budget_throttle: {n} alerts already emitted today"
-    return False, ""
-
-
-_RULES = (
-    ("dedup_4h", _rule_dedup_4h),
-    ("btc_beta", _rule_btc_beta),
-    ("sector_day", _rule_sector_day),
-    ("budget_throttle", _rule_budget_throttle),
-)
-
-
-def evaluate(alert: Any) -> tuple[str, str]:
-    """Run the suppression chain and return a decision tuple."""
-    for name, fn in _RULES:
+def _classifier_json(result: Any) -> str:
+    """Serialize the pydantic ClassifierResult to a JSON string for storage."""
+    if result is None:
+        return "{}"
+    if hasattr(result, "model_dump_json"):
+        return result.model_dump_json()
+    if hasattr(result, "dict"):
         try:
-            drop, reason = fn(alert)
+            return json.dumps(result.dict())
+        except Exception:
+            return "{}"
+    return "{}"
+
+
+def _direction(result: Any) -> str | None:
+    if result is None:
+        return None
+    return getattr(result, "direction", None)
+
+
+def _catalyst_type(result: Any) -> str | None:
+    if result is None:
+        return None
+    return getattr(result, "catalyst_type", None)
+
+
+def _summary(result: Any) -> str:
+    if result is None:
+        return ""
+    return (
+        getattr(result, "primary_catalyst", None)
+        or getattr(result, "summary", "")
+        or ""
+    )
+
+
+# ---------- the chain ----------
+
+def evaluate(
+    market: Any,
+    alert: Alert,
+    history: list,
+) -> tuple[str, str, dict]:
+    """Run the BOS-aware suppression chain. See module docstring for rule order."""
+
+    # Compute BOS + watchlist references up-front so every return path can
+    # ship them in the metadata dict.
+    broke_structure, structure_dir, breakout_level = ranker.has_breakout_structure(
+        market, history, current_price=market.price
+    )
+    swing_high_ref, swing_low_ref, swing_ts, median_range = (
+        ranker.precompute_references_for_watchlist(market, history)
+    )
+    metadata = {
+        "breakout_level": breakout_level,
+        "swing_high_reference": swing_high_ref,
+        "swing_low_reference": swing_low_ref,
+        "swing_reference_timestamp": swing_ts,
+        "median_bar_range": median_range,
+    }
+
+    classifier_dir = _direction(alert.classifier_result)
+
+    # ---- Rule 0: structural break or watchlist routing ----
+    if broke_structure:
+        if config.REQUIRE_DIRECTION_AGREEMENT and classifier_dir is not None:
+            if structure_dir != classifier_dir:
+                return ("DROP", "structure_direction_conflict", metadata)
+        # BOS confirmed → promote any existing watchlist entry for this ticker
+        # by removing it (the EMIT we're about to fire supersedes it). Then
+        # fall through to the remaining rules.
+        try:
+            storage.remove_from_watchlist(market.ticker)
         except Exception as e:
-            log.warning("suppression rule %s blew up: %s", name, e)
-            continue
-        if drop:
-            return "DROP", reason
-    return "EMIT", "ok"
+            log.warning("watchlist remove failed for %s: %s", market.ticker, e)
+    else:
+        # No BOS yet → maybe park on the watchlist
+        if alert.score >= config.WATCHLIST_SCORE_THRESHOLD and classifier_dir in ("long", "short"):
+            try:
+                storage.add_to_watchlist(
+                    ticker=market.ticker,
+                    asset_class=market.asset_class,
+                    direction_bias=classifier_dir,
+                    score=float(alert.score),
+                    catalyst_summary=_summary(alert.classifier_result),
+                    classifier_json=_classifier_json(alert.classifier_result),
+                    swing_high_reference=swing_high_ref,
+                    swing_low_reference=swing_low_ref,
+                    swing_reference_timestamp=swing_ts,
+                    median_bar_range=median_range or 0.0,
+                    ttl_hours=config.WATCHLIST_TTL_HOURS,
+                )
+            except Exception as e:
+                log.warning("watchlist add failed for %s: %s", market.ticker, e)
+            return ("WATCHLIST", "awaiting_structure_break", metadata)
+        return ("DROP", "no_structure_break", metadata)
+
+    # ---- Rule 1: per-catalyst-type dedup over 4h ----
+    if storage.recent_alert_exists(market.ticker, _catalyst_type(alert.classifier_result),
+                                    hours=config.DEDUP_HOURS):
+        return ("DROP", "dedup_4h", metadata)
+
+    # ---- Rule 2: BTC-beta gate (crypto only) ----
+    # Bypass when the current bar range is a high-conviction impulse — a
+    # >2.5x range break is a genuine move regardless of BTC correlation, and
+    # filtering it out costs us first-leg breakouts (the engine's main weakness
+    # before this carve-out: it only caught continuation breaks after the
+    # 24h-pct move had grown past R_ALPHA_MIN_PCT).
+    if _is_crypto(market.asset_class):
+        is_impulse = _is_impulse_break(history, median_range)
+        if not is_impulse:
+            rets, btc_rets = _crypto_returns_from_history(market, history)
+            alpha_z, r_alpha = beta.compute_alpha_z(market, {"ret_1h": rets, "btc_ret_1h": btc_rets})
+            # Per spec: drop if EITHER is weak. Stricter than the legacy AND gate.
+            if abs(alpha_z) < config.ALPHA_Z_MIN or abs(r_alpha) < config.R_ALPHA_MIN_PCT:
+                return ("DROP", "pure_btc_beta", metadata)
+
+    # ---- Rule 3: sector-day clustering ----
+    if storage.count_same_sector_alerts(market.asset_class, hours=config.DEDUP_HOURS) >= config.SECTOR_DAY_THRESHOLD:
+        if not storage.is_top_score_in_sector(market, alert.score, hours=config.DEDUP_HOURS):
+            return ("DROP", "sector_day_member", metadata)
+
+    # ---- Rule 4: daily budget throttle ----
+    if storage.count_alerts_today() >= config.DAILY_ALERT_BUDGET:
+        if alert.score < storage.median_score_today():
+            return ("DROP", "budget_throttle", metadata)
+
+    return ("EMIT", "ok", metadata)
+
+
+def _is_impulse_break(history: list, median_range: float | None) -> bool:
+    """True if the in-progress bar's range is a high-conviction impulse — i.e.
+    significantly wider than the BOS minimum (1.5x). When True we trust the
+    structural break enough to bypass the BTC-beta correlation filter."""
+    if not history or median_range is None or median_range <= 0:
+        return False
+    cur = history[-1]
+    cur_range = float((cur.high or 0.0) - (cur.low or 0.0))
+    return cur_range > config.IMPULSE_BYPASS_MULTIPLIER * float(median_range)
+
+
+def _crypto_returns_from_history(market: Any, history: list) -> tuple[list[float], list[float]]:
+    """Project the BAR-shaped history into hourly returns for the beta gate.
+    BTC returns are pulled separately from storage; if BTC isn't in the DB
+    yet the gate effectively passes (alpha_z = +inf in beta.compute_alpha_z).
+    """
+    closes = [b.close for b in history if b.close is not None]
+    rets: list[float] = []
+    for i in range(1, len(closes)):
+        prev = closes[i - 1]
+        if prev:
+            rets.append((closes[i] - prev) / prev)
+    btc_rets: list[float] = []
+    if market.ticker != "BTC":
+        try:
+            btc_bars = storage.recent_bars("BTC", hours=config.ROLLING_WINDOW_DAYS * 24)
+            btc_closes = [b.close for b in btc_bars if b.close is not None]
+            for i in range(1, len(btc_closes)):
+                prev = btc_closes[i - 1]
+                if prev:
+                    btc_rets.append((btc_closes[i] - prev) / prev)
+        except Exception as e:
+            log.debug("btc history fetch failed: %s", e)
+    return rets, btc_rets

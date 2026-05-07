@@ -23,7 +23,9 @@ falls back to the cold-start rule.
 from __future__ import annotations
 
 import math
-from typing import Iterable, Mapping, Sequence
+from dataclasses import dataclass
+from datetime import datetime, timezone
+from typing import Any, Iterable, Mapping, Sequence
 
 import numpy as np
 
@@ -175,3 +177,280 @@ def top_n_movers(
 
     scored.sort(key=lambda x: x[1], reverse=True)
     return scored[:n]
+
+
+# ============================================================================
+# BOS FILTER — structural swing detection + breakout confirmation
+# ============================================================================
+#
+# The legacy engine alerted on closed-bar Donchian breaks, which fired ~4h
+# late on a 4h timeframe (after the breakout candle had already closed). The
+# BOS filter replaces that with structural swing-high/swing-low references —
+# the actual prior pivots the market had been respecting — and a real-time
+# trigger that fires the moment live mark price crosses a stored level with
+# range expansion confirmed on the in-progress bar.
+
+
+@dataclass
+class SwingReference:
+    price: float
+    timestamp: datetime
+    bars_validated: int  # number of subsequent bars that confirmed it as unbroken
+
+
+def _bar_ts_to_datetime(ts: int) -> datetime:
+    """Bars store unix-second `ts`. SwingReference.timestamp is a `datetime`.
+    Use naive UTC to match storage's `datetime.utcnow().isoformat()` convention."""
+    return datetime.utcfromtimestamp(int(ts))
+
+
+def find_swing_high(
+    history: list,
+    lookback_hours: int,
+    min_age_hours: int,
+    min_bars_validation: int,
+) -> SwingReference | None:
+    """Find the most recent significant unbroken swing high.
+
+    A valid swing high is a bar whose high is the highest within an
+    *eligible* window (the lookback window minus the most recent
+    ``min_age_hours`` bars, which may include the in-progress break) AND
+    has not been exceeded by any of the >=``min_bars_validation`` bars
+    that came after it (excluding the current in-progress bar).
+
+    Returns the highest qualifying swing — i.e. the candidate the market
+    most recently respected. Returns None if no such pivot exists or if
+    history is too short.
+    """
+    if len(history) < lookback_hours + min_age_hours + min_bars_validation:
+        return None
+
+    # Eligible window excludes the most recent `min_age_hours` bars so we
+    # never pick the breakout candle's own wick as the reference.
+    eligible = history[-(lookback_hours + min_age_hours):-min_age_hours]
+    if not eligible:
+        return None
+
+    # Highest first — first unbroken candidate wins (matches the docstring
+    # "Returns the highest qualifying swing"). The prompt's reference code
+    # sorted by ts descending which contradicted the docstring; we honor the
+    # docstring and the AMD-style use case (the level the market actually
+    # respected, not just the most recent local high).
+    candidates = sorted(
+        eligible,
+        key=lambda b: (b.high if b.high is not None else float("-inf")),
+        reverse=True,
+    )
+    last_ts = history[-1].ts
+
+    for candidate in candidates:
+        candidate_high = candidate.high
+        if candidate_high is None:
+            continue
+        subsequent = [b for b in history if b.ts > candidate.ts and b.ts < last_ts]
+        if len(subsequent) < min_bars_validation:
+            continue
+        if any((b.high or float("-inf")) > candidate_high for b in subsequent):
+            continue
+        return SwingReference(
+            price=float(candidate_high),
+            timestamp=_bar_ts_to_datetime(candidate.ts),
+            bars_validated=len(subsequent),
+        )
+
+    # Fallback: strict logic exhausted — every candidate was broken by a
+    # subsequent bar. This is what trending markets look like (price ratchets
+    # up making sequential new highs), and under strict logic the engine
+    # would lose its reference at exactly the moment a breakout occurs.
+    # Use the absolute highest in the eligible window as a Donchian-style
+    # reference. bars_validated=0 signals "fallback" to consumers.
+    best = candidates[0] if candidates else None
+    if best is not None and best.high is not None:
+        return SwingReference(
+            price=float(best.high),
+            timestamp=_bar_ts_to_datetime(best.ts),
+            bars_validated=0,
+        )
+    return None
+
+
+def find_swing_low(
+    history: list,
+    lookback_hours: int,
+    min_age_hours: int,
+    min_bars_validation: int,
+) -> SwingReference | None:
+    """Mirror of `find_swing_high`. Returns the most recent unbroken swing low."""
+    if len(history) < lookback_hours + min_age_hours + min_bars_validation:
+        return None
+    eligible = history[-(lookback_hours + min_age_hours):-min_age_hours]
+    if not eligible:
+        return None
+    # Lowest first — first unbroken candidate wins (mirror of find_swing_high).
+    candidates = sorted(
+        eligible,
+        key=lambda b: (b.low if b.low is not None else float("inf")),
+    )
+    last_ts = history[-1].ts
+
+    for candidate in candidates:
+        candidate_low = candidate.low
+        if candidate_low is None:
+            continue
+        subsequent = [b for b in history if b.ts > candidate.ts and b.ts < last_ts]
+        if len(subsequent) < min_bars_validation:
+            continue
+        if any((b.low or float("inf")) < candidate_low for b in subsequent):
+            continue
+        return SwingReference(
+            price=float(candidate_low),
+            timestamp=_bar_ts_to_datetime(candidate.ts),
+            bars_validated=len(subsequent),
+        )
+
+    # Fallback: strict logic exhausted — Donchian-style absolute lowest
+    # in the eligible window. See find_swing_high for rationale.
+    best = candidates[0] if candidates else None
+    if best is not None and best.low is not None:
+        return SwingReference(
+            price=float(best.low),
+            timestamp=_bar_ts_to_datetime(best.ts),
+            bars_validated=0,
+        )
+    return None
+
+
+def compute_median_range(bars: list) -> float:
+    """Median (high - low) over the provided bars."""
+    ranges: list[float] = []
+    for b in bars:
+        h, l = getattr(b, "high", None), getattr(b, "low", None)
+        if h is None or l is None:
+            continue
+        ranges.append(float(h) - float(l))
+    if not ranges:
+        return 0.0
+    ranges.sort()
+    return ranges[len(ranges) // 2]
+
+
+def has_breakout_structure(
+    market: Any,
+    history: list,
+    current_price: float | None = None,
+) -> tuple[bool, str | None, float | None]:
+    """Real-time BOS detection.
+
+    Returns ``(broke_structure, direction, breakout_level)`` where
+    ``direction`` is ``"long"`` for a swing-high break, ``"short"`` for a
+    swing-low break, and ``None`` if neither.
+    """
+    if not history:
+        return (False, None, None)
+    if current_price is None:
+        current_price = float(history[-1].close or 0.0)
+    else:
+        current_price = float(current_price)
+
+    # Median range from the lookback window, excluding the in-progress bar.
+    lookback_bars = history[-(config.SWING_LOOKBACK_HOURS + 1):-1]
+    if len(lookback_bars) < 10:
+        return (False, None, None)
+
+    median_range = compute_median_range(lookback_bars)
+    if median_range <= 0:
+        return (False, None, None)
+
+    current_bar = history[-1]
+    current_range = float((current_bar.high or 0.0) - (current_bar.low or 0.0))
+    if current_range <= config.RANGE_EXPANSION_MULTIPLIER * median_range:
+        return (False, None, None)
+
+    swing_high = find_swing_high(
+        history,
+        lookback_hours=config.SWING_LOOKBACK_HOURS,
+        min_age_hours=config.SWING_MIN_AGE_HOURS,
+        min_bars_validation=config.SWING_MIN_BARS_VALIDATION,
+    )
+    if swing_high and current_price > swing_high.price:
+        return (True, "long", swing_high.price)
+
+    swing_low = find_swing_low(
+        history,
+        lookback_hours=config.SWING_LOOKBACK_HOURS,
+        min_age_hours=config.SWING_MIN_AGE_HOURS,
+        min_bars_validation=config.SWING_MIN_BARS_VALIDATION,
+    )
+    if swing_low and current_price < swing_low.price:
+        return (True, "short", swing_low.price)
+
+    return (False, None, None)
+
+
+def precompute_references_for_watchlist(
+    market: Any,
+    history: list,
+) -> tuple[float | None, float | None, datetime | None, float]:
+    """Precompute swing references and median range for a watchlist insert.
+
+    Returns ``(swing_high_price, swing_low_price, swing_timestamp, median_range)``.
+    If history is too short, returns ``(None, None, None, 0.0)``.
+    """
+    if not history:
+        return (None, None, None, 0.0)
+
+    swing_high = find_swing_high(
+        history,
+        config.SWING_LOOKBACK_HOURS,
+        config.SWING_MIN_AGE_HOURS,
+        config.SWING_MIN_BARS_VALIDATION,
+    )
+    swing_low = find_swing_low(
+        history,
+        config.SWING_LOOKBACK_HOURS,
+        config.SWING_MIN_AGE_HOURS,
+        config.SWING_MIN_BARS_VALIDATION,
+    )
+    lookback_bars = history[-(config.SWING_LOOKBACK_HOURS + 1):-1]
+    median_range = compute_median_range(lookback_bars)
+
+    swing_high_price = swing_high.price if swing_high else None
+    swing_low_price = swing_low.price if swing_low else None
+    swing_ts: datetime | None = None
+    if swing_high and swing_low:
+        swing_ts = max(swing_high.timestamp, swing_low.timestamp)
+    elif swing_high:
+        swing_ts = swing_high.timestamp
+    elif swing_low:
+        swing_ts = swing_low.timestamp
+
+    return (swing_high_price, swing_low_price, swing_ts, median_range)
+
+
+def check_breakout_against_stored_references(
+    current_price: float,
+    current_bar_range: float,
+    swing_high_reference: float | None,
+    swing_low_reference: float | None,
+    median_bar_range: float,
+    direction_bias: str,
+) -> tuple[bool, str | None, float | None]:
+    """Tier-2 lightweight BOS check. Compares live price + current bar range
+    against PRE-STORED references; never re-runs swing detection.
+
+    Only fires in the direction that matches ``direction_bias`` — this prevents
+    a long-bias watchlist entry from firing on a short-side break."""
+    if median_bar_range is None or median_bar_range <= 0:
+        return (False, None, None)
+    if float(current_bar_range) <= config.RANGE_EXPANSION_MULTIPLIER * float(median_bar_range):
+        return (False, None, None)
+
+    if direction_bias == "long" and swing_high_reference is not None:
+        if float(current_price) > float(swing_high_reference):
+            return (True, "long", float(swing_high_reference))
+
+    if direction_bias == "short" and swing_low_reference is not None:
+        if float(current_price) < float(swing_low_reference):
+            return (True, "short", float(swing_low_reference))
+
+    return (False, None, None)
