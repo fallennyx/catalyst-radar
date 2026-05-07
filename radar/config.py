@@ -15,6 +15,14 @@ SYMBOL_TO_CLASS = {
     sym: cls for cls, syms in ASSET_CLASSES.items() for sym in syms
 }
 
+# All asset classes the engine recognizes. Lighter exposes some that aren't
+# in ASSET_CLASSES (forex pairs, ETFs); this is the broader set that
+# `lighter.classify()` and replay validation accept.
+VALID_ASSET_CLASSES = (
+    "crypto_t1", "crypto_t2", "crypto_meme",
+    "equity", "commodity", "forex",
+)
+
 # ============ CADENCE ============
 FAST_CADENCE_SEC = 300
 SLOW_CADENCE_SEC = 900

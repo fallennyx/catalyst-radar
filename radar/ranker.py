@@ -257,6 +257,20 @@ def find_swing_high(
             timestamp=_bar_ts_to_datetime(candidate.ts),
             bars_validated=len(subsequent),
         )
+
+    # Fallback: strict logic exhausted — every candidate was broken by a
+    # subsequent bar. This is what trending markets look like (price ratchets
+    # up making sequential new highs), and under strict logic the engine
+    # would lose its reference at exactly the moment a breakout occurs.
+    # Use the absolute highest in the eligible window as a Donchian-style
+    # reference. bars_validated=0 signals "fallback" to consumers.
+    best = candidates[0] if candidates else None
+    if best is not None and best.high is not None:
+        return SwingReference(
+            price=float(best.high),
+            timestamp=_bar_ts_to_datetime(best.ts),
+            bars_validated=0,
+        )
     return None
 
 
@@ -292,6 +306,16 @@ def find_swing_low(
             price=float(candidate_low),
             timestamp=_bar_ts_to_datetime(candidate.ts),
             bars_validated=len(subsequent),
+        )
+
+    # Fallback: strict logic exhausted — Donchian-style absolute lowest
+    # in the eligible window. See find_swing_high for rationale.
+    best = candidates[0] if candidates else None
+    if best is not None and best.low is not None:
+        return SwingReference(
+            price=float(best.low),
+            timestamp=_bar_ts_to_datetime(best.ts),
+            bars_validated=0,
         )
     return None
 

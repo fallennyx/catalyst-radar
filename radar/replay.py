@@ -53,6 +53,7 @@ from typing import Any, Callable, Iterable
 from . import beta, classifier, config, ranker, storage, suppression
 from .catalysts import NewsItem
 from .suppression import Alert
+from .timefmt import fmt_cdt
 from .universe import Market
 
 log = logging.getLogger("radar.replay")
@@ -189,7 +190,7 @@ def make_replay_fetcher(
 # ============ default emit handler ============
 
 def _default_emit(alert: Alert, classification: Any | None) -> None:
-    when = datetime.fromtimestamp(storage._now(), tz=timezone.utc).isoformat()
+    when = fmt_cdt(storage._now(), "%Y-%m-%d %H:%M %Z")
     summary = ""
     if classification is not None:
         summary = (

@@ -314,3 +314,59 @@ def test_precompute_references_returns_zero_median_when_short():
     assert sh is None or isinstance(sh, float)
     assert sl is None or isinstance(sl, float)
     assert isinstance(median, float)
+
+
+# ---------- swing fallback (trending markets) ----------
+
+def test_find_swing_high_fallback_in_trending_market():
+    """When every candidate is broken by a sequential new high (uptrend),
+    the strict criterion fails. The fallback returns the absolute highest in
+    the eligible window so the engine still has a reference to break against.
+    """
+    bars: list[Bar] = []
+    # Sequentially-rising highs: bar i has high = 90 + i*0.5
+    # Each bar's high breaks the previous bar's high → strict logic finds
+    # nothing; fallback returns the highest bar in the eligible window.
+    for i in range(60):
+        h = 90.0 + i * 0.5
+        bars.append(_bar(ts=i * 3600, high=h, low=h - 0.4))
+    swing = ranker.find_swing_high(
+        bars, lookback_hours=48, min_age_hours=4, min_bars_validation=3
+    )
+    assert swing is not None
+    # Eligible window is bars[8:56] → highest is bar[55] with high=90+55*0.5=117.5
+    assert swing.price == 90.0 + 55 * 0.5
+    # Fallback signal: bars_validated=0 (strict requires >= min_bars_validation=3)
+    assert swing.bars_validated == 0
+
+
+def test_find_swing_high_strict_still_wins_when_clean():
+    """In a calm market with a clear unbroken pivot, strict logic should
+    still return that pivot (NOT the fallback)."""
+    bars: list[Bar] = []
+    for i in range(60):
+        if i == 20:
+            bars.append(_bar(ts=i * 3600, high=100.0, low=99.0))
+        else:
+            bars.append(_bar(ts=i * 3600, high=92.0, low=90.0))
+    swing = ranker.find_swing_high(
+        bars, lookback_hours=48, min_age_hours=4, min_bars_validation=3
+    )
+    assert swing is not None
+    assert swing.price == 100.0
+    # Strict pass returns >= min_bars_validation (3+)
+    assert swing.bars_validated >= 3
+
+
+def test_find_swing_low_fallback_in_downtrend():
+    bars: list[Bar] = []
+    for i in range(60):
+        l = 100.0 - i * 0.5
+        bars.append(_bar(ts=i * 3600, high=l + 0.4, low=l))
+    swing = ranker.find_swing_low(
+        bars, lookback_hours=48, min_age_hours=4, min_bars_validation=3
+    )
+    assert swing is not None
+    # Lowest in eligible window [8:56] is bar[55] with low=100-55*0.5=72.5
+    assert swing.price == 100.0 - 55 * 0.5
+    assert swing.bars_validated == 0
