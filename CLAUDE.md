@@ -31,20 +31,49 @@ radar/
   lighter.py       live Lighter universe (161 perps via mainnet API) + classify()
   universe.py      Market dataclass; sources from lighter.fetch_universe()
   storage.py       SQLite + Bar dataclass + 6 watchlist helpers + swappable _now()
-  ranker.py        composite score + swing detection + has_breakout_structure
+  ranker.py        composite score + 1h/4h swing detection + has_breakout_structure
+  trade_plan.py    deterministic SL/TP ladder attached to every BOS alert
   catalysts.py     asset-routed news (RSS / EDGAR / yfinance / GDELT)
   classifier.py    Anthropic Haiku tool_choice + substring evidence validator
   beta.py          BTC-beta gate (residual returns + alpha_z)
   suppression.py   5-rule chain (BOS-aware), Alert dataclass
-  telegram.py      send_bos_alert + send_watchlist_notification
+  telegram.py      send_bos_alert (with Plan: block) + send_watchlist_notification
   replay.py        virtual-clock historical playback
   fetch_bars.py    Binance (preferred) → CoinGecko fallback → yfinance for equities
   fetch_news.py    GDELT historical news
   timefmt.py       CDT/CST formatting (America/Chicago) — user-facing only
-tests/             93 passing; mock all external services
+tests/             ~120 passing; mock all external services
 data/              SQLite + sample data (bars.csv / news_archive.json gitignored)
 BOS_FILTER_NOTES.md  rationale + tuning guide for the BOS filter
 ```
+
+---
+
+## BOS engine — multi-timeframe (Phase 1, May 2026)
+
+`ranker.has_breakout_structure(market, history, current_price)` fires only
+when **both** conditions are true:
+
+1. **4h structural break** — live price has crossed a UTC-aligned 4h-frame swing
+   high (long) or swing low (short). 4h bars are synthesized on the fly via
+   `synthesize_4h_bars(bars_1h)` from the most recent `BOS_BAR_HISTORY_HOURS`
+   (240) of 1h history. Pivots use `find_swing_high/_low` reused with 4h params:
+   `SWING_LOOKBACK_4H_BARS=30`, `SWING_MIN_AGE_4H_BARS=1`,
+   `SWING_MIN_BARS_VALIDATION_4H=2` (loose: 8h validation).
+2. **1h range expansion confirmation** — the in-progress 1h bar's range
+   exceeds `RANGE_EXPANSION_MULTIPLIER × median 1h range` over the lookback
+   window (current threshold: 2.0×, was 1.5× pre-MTF).
+
+`metadata["breakout_level"]` is the **4h** swing reference. The watchlist also
+stores 4h levels (Tier 2 polls live price vs. those references with the 1h
+range-expansion check on the in-progress bar). The trade plan
+(`radar/trade_plan.py`) consumes `breakout_level` and produces stop = level
+± `STOP_BUFFER_PCT (0.2%)`, TP1 = 1.5R, TP2 = next prior swing OR 3R
+(whichever is closer, but never less aggressive than TP1).
+
+Cold-start: needs ≥ 33 4h-bars (≈ 5.5 days of 1h data) before the 4h frame
+can fire. Below that, `has_breakout_structure` returns `(False, None, None)`
+and Rule 0 routes to WATCHLIST (if score is high enough) or DROP.
 
 ---
 
@@ -73,14 +102,15 @@ These have all bitten this project. Don't repeat them.
 1. **`storage.recent_bars()` returns `list[Bar]`, not sqlite3.Row.** `Bar` has `__getitem__` so `r["close"]` still works for legacy callers, but new code should use `r.close` (attribute access).
 2. **`storage.insert_bar(open_=…)` — note the trailing underscore.** `open` is a Python builtin.
 3. **`storage._now` is a swappable module attribute.** Replay reassigns it for virtual-clock playback. Use `storage.set_clock(fn)` to override; pass `None` to restore. Every internal time read in storage MUST go through `_now()`, never `time.time()` directly.
-4. **`evaluate(market, alert, history)` returns a 3-tuple `(decision, reason, metadata)`.** The metadata dict carries `breakout_level`, `swing_high_reference`, `swing_low_reference`, `swing_reference_timestamp`, `median_bar_range` — downstream consumers (telegram, replay, alert log) read it.
+4. **`evaluate(market, alert, history)` returns a 3-tuple `(decision, reason, metadata)`.** The metadata dict carries `breakout_level` (4h swing), `structure_direction`, `swing_high_reference` (4h), `swing_low_reference` (4h), `swing_reference_timestamp`, `median_bar_range` (1h) — downstream consumers (telegram, replay, alert log, trade_plan) read it. The `structure_direction` field exists so replay-without-classifier can still build a trade plan.
 5. **`Alert` carries `classifier_result`.** `Alert(ticker, asset_class, score, alpha_z, r_alpha_pct, classifier_result=ClassifierResult)`. Without `classifier_result`, watchlist routing won't engage (no direction bias) and direction-conflict checks no-op.
 6. **`ClassifierResult` has legacy + extended fields.** Pydantic `model_validator(mode="after")` fills `primary_catalyst→summary`, `conviction→confidence`, `continuation_thesis→summary` when not supplied. Tests can construct with just the legacy fields.
 7. **`find_swing_high` / `find_swing_low` use a fallback ladder.** Strict pass returns highest unbroken pivot; fallback (signaled by `bars_validated == 0`) returns the absolute highest in the eligible window when strict logic exhausts. This was added because strict logic returned `None` in trending markets where every candidate gets broken sequentially — losing the reference precisely at the moment a breakout occurs. Don't remove the fallback.
 8. **`SWING_MIN_AGE_HOURS = 4`** excludes the most-recent 4 bars from swing detection so the breakout candle's own wick can't be picked as the reference. Lowering this risks self-reference.
 9. **All datetimes:** UTC unix-int for `bars_1h.ts` and `alerts.created_at`, ISO-8601 strings (naive UTC) for `watchlist.{added_at, expires_at, …}`. **User-facing display uses CDT** via `radar/timefmt.py`. Never mix.
 10. **Telegram lib v21 is async-only.** `telegram.py:_send_sync` runs the coroutine on a private event loop so the rest of the codebase can stay sync. Never block the main asyncio loop with `_send_sync`; if called from Tier 1/2 cycles it works because each cycle is `await asyncio.sleep`-bounded.
-11. **No new dependencies.** `pyproject.toml` is pinned. If you genuinely need one, ask first.
+11. **`BOS_BAR_HISTORY_HOURS = 240` (10 days) is the minimum history fetch for BOS evaluation.** The 4h frame needs ≥ 33 4h-bars (132 1h hours) to fire; main.py and replay.py both pull this much. Don't downsize without checking that 4h synthesis still has enough bars.
+12. **No new dependencies.** `pyproject.toml` is pinned. If you genuinely need one, ask first.
 
 ---
 
@@ -153,10 +183,34 @@ For new features:
 
 ## Active work / context for the agent
 
-- **Branch:** `feature/bos-filter-v2`. Pushed to `origin`.
-- **In flight:** wiring `fetch_bars` and `replay.load_bars` to use the live Lighter universe + auto-classification (`lighter.classify`). The Lighter module exists; the consumers still use the legacy `config.SYMBOL_TO_CLASS` map. Resume by adding `lighter.classify(ticker)` to fetch_bars's CSV row construction and replacing the `config.SYMBOL_TO_CLASS.values()` validation in `replay.load_bars` with `config.VALID_ASSET_CLASSES`.
-- **Forex/ETF routing in `fetch_bars`** is not yet implemented — tickers like `EURUSD`, `SPY`, `QQQ` from Lighter currently fall through `fetch_yfinance_hourly` which mostly works for equities/ETFs but doesn't handle forex symbol mapping (needs `=X` suffix).
-- **Trade plan (SL/TP) not yet built.** User asked about deterministic stop-loss + take-profit ladders attached to every alert. Recommended approach: new `radar/trade_plan.py` with `compute_plan(market, history, metadata, direction) → entry/stop/tp1/tp2/risk_per_unit/r_multiple`. Wire into `telegram.send_bos_alert` payload. No second LLM call — direction comes from suppression metadata, stop = broken swing level + small buffer, tp1 = 1.5R, tp2 = next prior swing.
+- **Branch:** `master` (working tree dirty — user commits manually; never auto-commit, branch, or push).
+- **Recently landed (May 2026):**
+  - **Trade plan** (`radar/trade_plan.py`) — every BOS EMIT carries a deterministic
+    SL/TP ladder. Plan block is rendered in the Telegram payload via
+    `telegram._format_plan`. TP2 = `min(next_prior_swing, entry + 3R)` for longs,
+    mirrored for shorts; pivots inside TP1 are skipped so the ladder always
+    progresses outward.
+  - **MTF BOS Phase 1** — 4h structural break + 1h range-expansion confirmation
+    (see "BOS engine" section above). RANGE_EXPANSION 1.5→2.0,
+    SWING_MIN_BARS_VALIDATION 3→6 on the 1h frame. New 4h knobs added.
+  - **`structure_direction` in suppression metadata** — replay-without-classifier
+    can now build trade plans by falling back to the structural direction.
+  - **`BOS_BAR_HISTORY_HOURS = 240`** — main.py and replay.py both pull this
+    much history before invoking `has_breakout_structure` (4h synthesis needs
+    ≥ 33 4h-bars).
+- **In flight (older, unfinished):** wiring `fetch_bars` and `replay.load_bars`
+  to use the live Lighter universe + auto-classification (`lighter.classify`).
+  Lighter module exists; consumers still use the legacy `config.SYMBOL_TO_CLASS`
+  map. Resume by adding `lighter.classify(ticker)` to fetch_bars's CSV row
+  construction and replacing `config.SYMBOL_TO_CLASS.values()` validation in
+  `replay.load_bars` with `config.VALID_ASSET_CLASSES`.
+- **Forex/ETF routing in `fetch_bars`** still not implemented — `EURUSD`,
+  `SPY`, `QQQ` from Lighter fall through `fetch_yfinance_hourly` which doesn't
+  handle the `=X` forex suffix.
+- **MTF Phase 2 deferred (15-min trigger frame):** would solve the
+  "alert at 03:15 not 04:00" intra-bar latency. Needs Binance access (currently
+  geo-blocked) or paid CoinGecko tier. Hold off until live trading confirms
+  Phase 1 is producing the right alert mix.
 
 ---
 
@@ -166,9 +220,12 @@ For new features:
 - A web dashboard / HTTP API
 - Persistent message queues
 - Per-asset-class swing-lookback tuning (single `SWING_LOOKBACK_HOURS` for all)
-- Multi-timeframe BOS confirmation
 - Two-bar close confirmation
 - WebSocket-based live price (SDK polling is the v2 floor; WS is v3 roadmap)
 - ML model training, backtesting frameworks beyond `radar/replay.py`
 - Trade execution (the engine never places an order; alerts only)
+- Position sizing or account-fraction risk math (the trade plan is advisory only)
 - Any unlisted dependency in `pyproject.toml`
+
+(Multi-timeframe BOS confirmation was previously listed as an anti-feature;
+it's now Phase 1 of the engine — see "BOS engine" above.)

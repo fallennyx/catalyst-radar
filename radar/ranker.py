@@ -204,6 +204,60 @@ def _bar_ts_to_datetime(ts: int) -> datetime:
     return datetime.utcfromtimestamp(int(ts))
 
 
+# ---------- 4h bar synthesis ----------
+
+_FOUR_HOUR_SECS = 4 * 3600
+
+
+def synthesize_4h_bars(bars_1h: list) -> list:
+    """Resample 1h Bar list into UTC-aligned 4h Bars.
+
+    4h buckets start at 00:00, 04:00, 08:00, 12:00, 16:00, 20:00 UTC.
+    The most recent (in-progress) 4h bucket is included with whatever 1h bars
+    are present so far — callers should treat ``-min_age_4h_bars`` as the
+    cutoff rather than excluding it manually.
+
+    Open/close come from the first/last hourly bar in the bucket; high/low
+    are bucket extremes; volume/oi/funding are summed/averaged where they
+    have meaning. Buckets with no 1h bars are silently skipped.
+    """
+    if not bars_1h:
+        return []
+
+    # Import here to avoid circular: ranker → storage → ranker would re-trigger.
+    from .storage import Bar
+
+    # Group 1h bars by their 4h bucket key.
+    buckets: dict[int, list] = {}
+    for b in bars_1h:
+        key = (int(b.ts) // _FOUR_HOUR_SECS) * _FOUR_HOUR_SECS
+        buckets.setdefault(key, []).append(b)
+
+    out: list[Bar] = []
+    for key in sorted(buckets):
+        members = sorted(buckets[key], key=lambda b: int(b.ts))
+        ticker = members[0].ticker
+        opens = [m.open for m in members if m.open is not None]
+        closes = [m.close for m in members if m.close is not None]
+        highs = [m.high for m in members if m.high is not None]
+        lows = [m.low for m in members if m.low is not None]
+        vols = [m.volume for m in members if m.volume is not None]
+        ois = [m.oi for m in members if m.oi is not None]
+        fundings = [m.funding for m in members if m.funding is not None]
+        out.append(Bar(
+            ticker=ticker,
+            ts=key,
+            open=opens[0] if opens else None,
+            high=max(highs) if highs else None,
+            low=min(lows) if lows else None,
+            close=closes[-1] if closes else None,
+            volume=sum(vols) if vols else None,
+            oi=ois[-1] if ois else None,  # OI is a stock, not a flow — use last
+            funding=(sum(fundings) / len(fundings)) if fundings else None,
+        ))
+    return out
+
+
 def find_swing_high(
     history: list,
     lookback_hours: int,
@@ -339,11 +393,18 @@ def has_breakout_structure(
     history: list,
     current_price: float | None = None,
 ) -> tuple[bool, str | None, float | None]:
-    """Real-time BOS detection.
+    """Multi-timeframe BOS detection.
+
+    A break is confirmed when:
+      1. The in-progress 1h bar's range exceeds RANGE_EXPANSION_MULTIPLIER ×
+         median 1h range (the trigger event — confirmation that the move is
+         impulsive on the lower timeframe).
+      2. Live price has crossed a 4h structural swing high (long) or swing
+         low (short). 4h bars are synthesized UTC-aligned from the 1h history.
 
     Returns ``(broke_structure, direction, breakout_level)`` where
-    ``direction`` is ``"long"`` for a swing-high break, ``"short"`` for a
-    swing-low break, and ``None`` if neither.
+    ``breakout_level`` is the **4h** swing reference. ``direction`` is
+    ``"long"`` for a swing-high break, ``"short"`` for a swing-low break.
     """
     if not history:
         return (False, None, None)
@@ -352,37 +413,45 @@ def has_breakout_structure(
     else:
         current_price = float(current_price)
 
-    # Median range from the lookback window, excluding the in-progress bar.
-    lookback_bars = history[-(config.SWING_LOOKBACK_HOURS + 1):-1]
-    if len(lookback_bars) < 10:
+    # ---- 1h confirmation: range expansion on the in-progress hourly bar ----
+    lookback_1h = history[-(config.SWING_LOOKBACK_HOURS + 1):-1]
+    if len(lookback_1h) < 10:
         return (False, None, None)
-
-    median_range = compute_median_range(lookback_bars)
-    if median_range <= 0:
+    median_range_1h = compute_median_range(lookback_1h)
+    if median_range_1h <= 0:
         return (False, None, None)
-
     current_bar = history[-1]
     current_range = float((current_bar.high or 0.0) - (current_bar.low or 0.0))
-    if current_range <= config.RANGE_EXPANSION_MULTIPLIER * median_range:
+    if current_range <= config.RANGE_EXPANSION_MULTIPLIER * median_range_1h:
         return (False, None, None)
 
-    swing_high = find_swing_high(
-        history,
-        lookback_hours=config.SWING_LOOKBACK_HOURS,
-        min_age_hours=config.SWING_MIN_AGE_HOURS,
-        min_bars_validation=config.SWING_MIN_BARS_VALIDATION,
+    # ---- 4h structural break ----
+    bars_4h = synthesize_4h_bars(history)
+    needed_4h = (
+        config.SWING_LOOKBACK_4H_BARS
+        + config.SWING_MIN_AGE_4H_BARS
+        + config.SWING_MIN_BARS_VALIDATION_4H
     )
-    if swing_high and current_price > swing_high.price:
-        return (True, "long", swing_high.price)
+    if len(bars_4h) < needed_4h:
+        return (False, None, None)
 
-    swing_low = find_swing_low(
-        history,
-        lookback_hours=config.SWING_LOOKBACK_HOURS,
-        min_age_hours=config.SWING_MIN_AGE_HOURS,
-        min_bars_validation=config.SWING_MIN_BARS_VALIDATION,
+    swing_high_4h = find_swing_high(
+        bars_4h,
+        lookback_hours=config.SWING_LOOKBACK_4H_BARS,
+        min_age_hours=config.SWING_MIN_AGE_4H_BARS,
+        min_bars_validation=config.SWING_MIN_BARS_VALIDATION_4H,
     )
-    if swing_low and current_price < swing_low.price:
-        return (True, "short", swing_low.price)
+    if swing_high_4h and current_price > swing_high_4h.price:
+        return (True, "long", swing_high_4h.price)
+
+    swing_low_4h = find_swing_low(
+        bars_4h,
+        lookback_hours=config.SWING_LOOKBACK_4H_BARS,
+        min_age_hours=config.SWING_MIN_AGE_4H_BARS,
+        min_bars_validation=config.SWING_MIN_BARS_VALIDATION_4H,
+    )
+    if swing_low_4h and current_price < swing_low_4h.price:
+        return (True, "short", swing_low_4h.price)
 
     return (False, None, None)
 
@@ -391,28 +460,40 @@ def precompute_references_for_watchlist(
     market: Any,
     history: list,
 ) -> tuple[float | None, float | None, datetime | None, float]:
-    """Precompute swing references and median range for a watchlist insert.
+    """Precompute **4h** swing references + 1h median range for a watchlist row.
 
-    Returns ``(swing_high_price, swing_low_price, swing_timestamp, median_range)``.
+    The watchlist now stores the 4h structural levels (since those are what
+    Tier 2 polls against). The median range stays on the 1h frame because
+    Tier 2's range-expansion check runs on the in-progress 1h bar.
+
+    Returns ``(swing_high_price, swing_low_price, swing_timestamp, median_range_1h)``.
     If history is too short, returns ``(None, None, None, 0.0)``.
     """
     if not history:
         return (None, None, None, 0.0)
 
-    swing_high = find_swing_high(
-        history,
-        config.SWING_LOOKBACK_HOURS,
-        config.SWING_MIN_AGE_HOURS,
-        config.SWING_MIN_BARS_VALIDATION,
-    )
-    swing_low = find_swing_low(
-        history,
-        config.SWING_LOOKBACK_HOURS,
-        config.SWING_MIN_AGE_HOURS,
-        config.SWING_MIN_BARS_VALIDATION,
-    )
-    lookback_bars = history[-(config.SWING_LOOKBACK_HOURS + 1):-1]
-    median_range = compute_median_range(lookback_bars)
+    bars_4h = synthesize_4h_bars(history)
+    swing_high = swing_low = None
+    if len(bars_4h) >= (
+        config.SWING_LOOKBACK_4H_BARS
+        + config.SWING_MIN_AGE_4H_BARS
+        + config.SWING_MIN_BARS_VALIDATION_4H
+    ):
+        swing_high = find_swing_high(
+            bars_4h,
+            config.SWING_LOOKBACK_4H_BARS,
+            config.SWING_MIN_AGE_4H_BARS,
+            config.SWING_MIN_BARS_VALIDATION_4H,
+        )
+        swing_low = find_swing_low(
+            bars_4h,
+            config.SWING_LOOKBACK_4H_BARS,
+            config.SWING_MIN_AGE_4H_BARS,
+            config.SWING_MIN_BARS_VALIDATION_4H,
+        )
+
+    lookback_1h = history[-(config.SWING_LOOKBACK_HOURS + 1):-1]
+    median_range_1h = compute_median_range(lookback_1h)
 
     swing_high_price = swing_high.price if swing_high else None
     swing_low_price = swing_low.price if swing_low else None
@@ -424,7 +505,7 @@ def precompute_references_for_watchlist(
     elif swing_low:
         swing_ts = swing_low.timestamp
 
-    return (swing_high_price, swing_low_price, swing_ts, median_range)
+    return (swing_high_price, swing_low_price, swing_ts, median_range_1h)
 
 
 def check_breakout_against_stored_references(

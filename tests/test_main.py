@@ -116,8 +116,8 @@ def test_tier2_promotes_on_live_price_cross(tmp_db):
     def fake_snapshot(ticker):
         return _mk_market(ticker, price=370.0)
 
-    def fake_send(market, result, metadata, source):
-        sent.append((market.ticker, metadata, source))
+    def fake_send(market, result, metadata, source, plan=None):
+        sent.append((market.ticker, metadata, source, plan))
         return True
 
     with patch.object(radar_main.universe, "get_market_snapshot", fake_snapshot), \
@@ -125,7 +125,7 @@ def test_tier2_promotes_on_live_price_cross(tmp_db):
         asyncio.run(radar_main.run_trigger_poll())
 
     assert len(sent) == 1
-    ticker, metadata, source = sent[0]
+    ticker, metadata, source, _plan = sent[0]
     assert ticker == "AMD"
     assert source == "tier2_promoted"
     assert metadata["breakout_level"] == 362.0  # NOT the close ($370)
@@ -141,8 +141,8 @@ def test_tier2_does_not_promote_without_range_expansion(tmp_db):
 
     sent: list[tuple] = []
 
-    def fake_send(market, result, metadata, source):
-        sent.append((market.ticker, metadata, source))
+    def fake_send(market, result, metadata, source, plan=None):
+        sent.append((market.ticker, metadata, source, plan))
         return True
 
     with patch.object(radar_main.universe, "get_market_snapshot",
@@ -163,9 +163,10 @@ def test_tier2_promotion_includes_hours_on_watchlist_in_metadata(tmp_db):
 
     captured: dict = {}
 
-    def fake_send(market, result, metadata, source):
+    def fake_send(market, result, metadata, source, plan=None):
         captured.update(metadata)
         captured["source"] = source
+        captured["plan"] = plan
         return True
 
     with patch.object(radar_main.universe, "get_market_snapshot",

@@ -186,16 +186,36 @@ def test_find_swing_high_insufficient_history():
     assert swing is None
 
 
-def test_has_breakout_structure_long_break_with_range_expansion():
-    """Stable history, prior swing high at 100, current bar wide-range above it."""
+def _bars_with_4h_pivot_high(
+    n_hours: int = 200,
+    pivot_4h_idx: int = 25,
+    pivot_high: float = 100.0,
+    base_high: float = 92.0,
+    base_low: float = 90.0,
+) -> list[Bar]:
+    """Build an N-hour history where one 4h bucket has an elevated high.
+
+    `pivot_4h_idx` is the 4h-bucket index (0-based); the pivot bar is placed
+    inside that bucket. With n_hours=200 that's 50 4h-buckets — plenty for
+    SWING_LOOKBACK_4H_BARS=30 + age=1 + validation=2.
+    """
     bars: list[Bar] = []
-    for i in range(60):
-        if i == 20:
-            bars.append(_bar(ts=i * 3600, high=100.0, low=99.0))
+    pivot_hour_idx = pivot_4h_idx * 4 + 1  # second hour of the bucket
+    for i in range(n_hours):
+        if i == pivot_hour_idx:
+            bars.append(_bar(ts=i * 3600, high=pivot_high, low=pivot_high - 1.0,
+                             close=pivot_high - 0.5))
         else:
-            bars.append(_bar(ts=i * 3600, high=92.0, low=90.0))
-    # current in-progress bar with wide range and price above 100
-    bars[-1] = _bar(ts=59 * 3600, high=103.0, low=99.0, close=102.5)
+            bars.append(_bar(ts=i * 3600, high=base_high, low=base_low))
+    return bars
+
+
+def test_has_breakout_structure_long_break_with_range_expansion():
+    """Stable 200-hour history, 4h swing high at 100, current 1h bar wide-range
+    and live price above the 4h reference."""
+    bars = _bars_with_4h_pivot_high()
+    # in-progress 1h bar: wide range (2.5x median 1h ~2.0 = 5.0), price > 100
+    bars[-1] = _bar(ts=199 * 3600, high=103.0, low=98.0, close=102.5)
     market = Market(ticker="TEST", asset_class="crypto_t1")
     broke, direction, level = ranker.has_breakout_structure(
         market, bars, current_price=103.0
@@ -206,14 +226,9 @@ def test_has_breakout_structure_long_break_with_range_expansion():
 
 
 def test_has_breakout_structure_long_break_without_range_expansion():
-    """Same setup but current bar range is normal — must NOT fire."""
-    bars: list[Bar] = []
-    for i in range(60):
-        if i == 20:
-            bars.append(_bar(ts=i * 3600, high=100.0, low=99.0))
-        else:
-            bars.append(_bar(ts=i * 3600, high=92.0, low=90.0))
-    bars[-1] = _bar(ts=59 * 3600, high=103.0, low=102.5, close=102.8)  # range 0.5
+    """Same setup but current 1h bar range is normal — must NOT fire."""
+    bars = _bars_with_4h_pivot_high()
+    bars[-1] = _bar(ts=199 * 3600, high=103.0, low=102.5, close=102.8)  # range 0.5
     market = Market(ticker="TEST", asset_class="crypto_t1")
     broke, direction, level = ranker.has_breakout_structure(
         market, bars, current_price=103.0
@@ -224,15 +239,10 @@ def test_has_breakout_structure_long_break_without_range_expansion():
 
 
 def test_has_breakout_structure_uses_live_price_over_close():
-    """history close at 99 (no break), current_price=103 → BOS fires."""
-    bars: list[Bar] = []
-    for i in range(60):
-        if i == 20:
-            bars.append(_bar(ts=i * 3600, high=100.0, low=99.0))
-        else:
-            bars.append(_bar(ts=i * 3600, high=92.0, low=90.0))
-    # in-progress bar wide range, but bar.close still at 99
-    bars[-1] = _bar(ts=59 * 3600, high=99.5, low=95.0, close=99.0)
+    """Bar close at 99 (no break), but current_price=103 → BOS fires on live."""
+    bars = _bars_with_4h_pivot_high()
+    # in-progress 1h bar: wide range, but bar.close still at 99
+    bars[-1] = _bar(ts=199 * 3600, high=99.5, low=94.0, close=99.0)
     market = Market(ticker="TEST", asset_class="crypto_t1")
     broke, direction, level = ranker.has_breakout_structure(
         market, bars, current_price=103.0
@@ -240,6 +250,17 @@ def test_has_breakout_structure_uses_live_price_over_close():
     assert broke is True
     assert direction == "long"
     assert level == 100.0
+
+
+def test_has_breakout_structure_short_history_returns_no_break():
+    """Without enough 1h history to synthesize 33+ 4h bars, no BOS can fire."""
+    bars: list[Bar] = []
+    for i in range(60):  # only 15 4h-bars worth
+        bars.append(_bar(ts=i * 3600, high=92.0, low=90.0))
+    bars[-1] = _bar(ts=59 * 3600, high=120.0, low=89.0, close=119.0)
+    market = Market(ticker="TEST", asset_class="crypto_t1")
+    broke, _, _ = ranker.has_breakout_structure(market, bars, current_price=120.0)
+    assert broke is False
 
 
 def test_check_breakout_against_stored_references_respects_direction_bias():

@@ -26,7 +26,7 @@ from dotenv import load_dotenv
 
 from . import (
     beta, catalysts, classifier, config, ranker, storage,
-    suppression, telegram, universe,
+suppression, telegram, trade_plan, universe,
 )
 from .suppression import Alert
 
@@ -152,7 +152,7 @@ async def run_discovery_cycle() -> None:
                                 btc_rets=btc_rets, score=score)
             bar_history = storage.recent_bars(
                 market.ticker,
-                hours=config.SWING_LOOKBACK_HOURS * 2,
+                hours=config.BOS_BAR_HISTORY_HOURS,
             )
             decision, reason, metadata = suppression.evaluate(market, alert, bar_history)
             storage.record_alert(alert, decision=decision, reason=reason,
@@ -168,12 +168,21 @@ async def run_discovery_cycle() -> None:
                     metadata.get("swing_low_reference"),
                 )
             elif decision == "EMIT":
-                telegram.send_bos_alert(market, result, metadata, source="tier1_immediate")
+                plan = trade_plan.compute_plan(
+                    market, bar_history, metadata,
+                    direction=str(getattr(result, "direction", "") or ""),
+                )
+                telegram.send_bos_alert(
+                    market, result, metadata,
+                    source="tier1_immediate", plan=plan,
+                )
                 log.info(
-                    "Tier 1 → EMIT %s %s at break of %s",
+                    "Tier 1 → EMIT %s %s at break of %s%s",
                     market.ticker,
                     getattr(result, "catalyst_type", "?"),
                     metadata.get("breakout_level"),
+                    f" plan(stop={plan.stop:.4f} tp1={plan.tp1:.4f} tp2={plan.tp2:.4f})"
+                    if plan is not None else " (no plan)",
                 )
             else:
                 log.info("Tier 1 → DROP %s: %s", market.ticker, reason)
@@ -250,7 +259,21 @@ async def run_trigger_poll() -> None:
                 "hours_on_watchlist": hours_on_watchlist,
             }
 
-            telegram.send_bos_alert(live_market, result, metadata, source="tier2_promoted")
+            # Pull a wider history window so the trade plan can find a "next
+            # prior swing" target; `recent` (2h) is too narrow.
+            plan_history = storage.recent_bars(
+                ticker, hours=config.BOS_BAR_HISTORY_HOURS,
+            )
+            plan = trade_plan.compute_plan(
+                live_market, plan_history, metadata,
+                direction=str(getattr(result, "direction", "")
+                              or entry.get("direction_bias") or ""),
+            )
+
+            telegram.send_bos_alert(
+                live_market, result, metadata,
+                source="tier2_promoted", plan=plan,
+            )
 
             promoted_alert = Alert(
                 ticker=ticker,

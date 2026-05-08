@@ -84,13 +84,33 @@ ROLLING_WINDOW_DAYS = 30
 TELEGRAM_PARSE_MODE = "Markdown"
 
 # ============ BOS FILTER ============
-SWING_LOOKBACK_HOURS = 48           # how far back to scan for prior swings
+# 1h frame — used for confirmation (range expansion) and as the legacy/cold-start
+# fallback when 4h history is too short.
+SWING_LOOKBACK_HOURS = 48           # how far back to scan for prior 1h swings
 SWING_MIN_AGE_HOURS = 4             # ignore swings inside the most recent N hours
-SWING_MIN_BARS_VALIDATION = 3       # swing must be unbroken for >= N subsequent bars
-RANGE_EXPANSION_MULTIPLIER = 1.5    # current bar range vs median of lookback
+SWING_MIN_BARS_VALIDATION = 6       # swing must be unbroken for >= N subsequent 1h bars
+RANGE_EXPANSION_MULTIPLIER = 2.0    # current 1h bar range vs median of lookback
 IMPULSE_BYPASS_MULTIPLIER = 2.5     # if current bar range > N x median, bypass BTC-beta gate
+
+# 4h frame — primary structural BOS reference. Synthesized from 1h bars on the
+# fly (UTC-aligned: 00, 04, 08, 12, 16, 20).
+SWING_LOOKBACK_4H_BARS = 30         # 30 4h-bars = 5 days of structure
+SWING_MIN_AGE_4H_BARS = 1           # skip the in-progress 4h bar
+SWING_MIN_BARS_VALIDATION_4H = 2    # pivot must hold for >=2 4h bars (8h validation)
+
+# How much 1h history to fetch for BOS evaluation. Must be wide enough to
+# synthesize SWING_LOOKBACK_4H_BARS + age + validation 4h bars (with a safety
+# buffer). 240 hours = 10 days = 60 4h-bars, well above the 33-bar minimum.
+BOS_BAR_HISTORY_HOURS = max(SWING_LOOKBACK_HOURS * 2, 240)
+
 WATCHLIST_SCORE_THRESHOLD = 60      # min score to enter watchlist if no BOS yet
 WATCHLIST_TTL_HOURS = 72            # auto-expire stale watchlist entries (72h, not 24h, to capture multi-day catalyst arcs like TON)
 REQUIRE_DIRECTION_AGREEMENT = True  # BOS direction must match LLM direction
 TRIGGER_POLL_INTERVAL_SEC = 60      # how often Tier 2 polls watchlist tickers
 TRIGGER_POLL_MAX_TICKERS = 50       # safety cap; rarely hit in practice
+
+# ============ TRADE PLAN ============
+STOP_BUFFER_PCT = 0.002             # stop = broken swing ± 0.2% so a re-test doesn't immediately stop you out
+TP1_R_MULTIPLE = 1.5                # take-profit 1 at 1.5R from entry
+TP2_FALLBACK_R_MULTIPLE = 3.0       # tp2 fallback when no second swing reference exists
+MIN_RISK_PCT_OF_ENTRY = 0.0005      # if risk_per_unit < 0.05% of entry, the break is too tight for a real trade

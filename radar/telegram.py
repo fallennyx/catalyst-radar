@@ -182,16 +182,43 @@ def _send_watchlist(text: str, market_label: str = "?") -> bool:
         return False
 
 
+def _format_plan(plan: Any) -> str:
+    """Render a TradePlan as a Markdown block matching the BOS alert style."""
+    direction = (getattr(plan, "direction", "") or "").upper()
+    entry = float(getattr(plan, "entry", 0.0) or 0.0)
+    stop = float(getattr(plan, "stop", 0.0) or 0.0)
+    tp1 = float(getattr(plan, "tp1", 0.0) or 0.0)
+    tp2 = float(getattr(plan, "tp2", 0.0) or 0.0)
+    risk = float(getattr(plan, "risk_per_unit", 0.0) or 0.0)
+    r_tp1 = float(getattr(plan, "r_multiple_tp1", 0.0) or 0.0)
+    r_tp2 = float(getattr(plan, "r_multiple_tp2", 0.0) or 0.0)
+
+    def _pct(level: float) -> float:
+        return ((level - entry) / entry * 100.0) if entry else 0.0
+
+    return (
+        f"*Plan:* {direction} @ ${_fmt_price(entry)}\n"
+        f"Stop: ${_fmt_price(stop)} ({_pct(stop):+.2f}%)   Risk: ${_fmt_price(risk)}\n"
+        f"TP1: ${_fmt_price(tp1)} ({_pct(tp1):+.2f}%, {r_tp1:.1f}R)\n"
+        f"TP2: ${_fmt_price(tp2)} ({_pct(tp2):+.2f}%, {r_tp2:.1f}R)"
+    )
+
+
 def send_bos_alert(
     market: Any,
     classifier_result: Any,
     metadata: dict,
     source: str = "tier1_immediate",
+    plan: Any | None = None,
 ) -> bool:
     """Send a confirmed BOS alert.
 
     `source` is "tier1_immediate" (BOS confirmed at scan time) or
     "tier2_promoted" (BOS confirmed via watchlist polling).
+
+    `plan` is an optional ``trade_plan.TradePlan`` whose levels are appended
+    as a "Plan:" block. Computed by the caller; passing ``None`` falls back
+    to the legacy alert-without-plan format.
     """
     breakout_level = metadata.get("breakout_level")
     promoted_tag = ""
@@ -224,6 +251,8 @@ def send_bos_alert(
     oi = float(getattr(market, "oi_usd", 0.0) or 0.0)
     funding = float(getattr(market, "funding_1h", 0.0) or 0.0)
 
+    plan_block = f"\n\n{_format_plan(plan)}" if plan is not None else ""
+
     body = (
         f"{direction_emoji} *RADAR — {ticker}* {pct_24h:+.2f}%{promoted_tag}\n"
         f"{asset_class}{_session_tag(market)}\n\n"
@@ -232,7 +261,7 @@ def send_bos_alert(
         f"*Type:* {_md_escape(catalyst_type)} · *Conviction:* {conviction*100:.0f}/100\n"
         f"*Horizon:* {_md_escape(horizon)}\n\n"
         f"{_md_escape(thesis)}\n\n"
-        f"*Kill:* {_md_escape(kill)}\n\n"
+        f"*Kill:* {_md_escape(kill)}{plan_block}\n\n"
         f"Vol ${vol/1e6:.1f}M | OI ${oi/1e6:.1f}M | Funding {funding*100:.4f}%\n"
         f"[Open in Lighter](https://app.lighter.xyz/trade/{ticker})"
     )

@@ -66,30 +66,35 @@ def _alert(
     )
 
 
+_HIST_LEN = 200  # enough hours to synthesize 50 4h bars (>= 33 needed)
+_PIVOT_HOUR = 101  # inside 4h-bucket idx=25 (within the lookback-30 eligible window)
+
+
 def _bos_history_long_break(price_above: float = 105.0):
-    """Return a Bar-list where a swing high at $100 has been broken at the
-    in-progress bar (current price > $100 with range expansion)."""
+    """Return a Bar-list where a 4h swing high at $100 has been broken at the
+    in-progress 1h bar (current price > $100 with 1h range expansion)."""
     from radar.storage import Bar
     bars: list[Bar] = []
-    for i in range(60):
-        if i == 20:
+    for i in range(_HIST_LEN):
+        if i == _PIVOT_HOUR:
             bars.append(Bar(ticker="X", ts=i * 3600, high=100.0, low=99.0,
                             close=99.5, volume=0, oi=0, funding=0))
         else:
             bars.append(Bar(ticker="X", ts=i * 3600, high=92.0, low=90.0,
                             close=91.0, volume=0, oi=0, funding=0))
-    # in-progress bar: wide range, price wicks above 100
-    bars[-1] = Bar(ticker="X", ts=59 * 3600, open=99.0, high=price_above,
-                   low=99.0, close=price_above, volume=0, oi=0, funding=0)
+    # in-progress 1h bar: wide range (5 vs median 2 = 2.5x), price wicks above 100
+    bars[-1] = Bar(ticker="X", ts=(_HIST_LEN - 1) * 3600, open=99.0,
+                   high=price_above, low=94.0, close=price_above,
+                   volume=0, oi=0, funding=0)
     return bars
 
 
 def _bos_history_no_break():
-    """Bar-list where price stays below the swing high — no BOS."""
+    """Bar-list where price stays below the 4h swing high — no BOS."""
     from radar.storage import Bar
     bars: list[Bar] = []
-    for i in range(60):
-        if i == 20:
+    for i in range(_HIST_LEN):
+        if i == _PIVOT_HOUR:
             bars.append(Bar(ticker="X", ts=i * 3600, high=100.0, low=99.0,
                             close=99.5, volume=0, oi=0, funding=0))
         else:
@@ -242,11 +247,11 @@ def test_dedup_4h_does_not_block_different_catalyst_type(tmp_db):
 
 def test_btc_beta_drops_low_alpha_crypto(tmp_db):
     """Crypto with weak alpha_z → DROP under the new OR gate (moderate break only)."""
-    market = _market("ETH", asset_class="crypto_t1", price=103.5)
+    market = _market("ETH", asset_class="crypto_t1", price=104.0)
     alert = _alert("ETH", asset_class="crypto_t1",
                    alpha_z=0.5, r_alpha_pct=1.0, direction="long")
     # Use the moderate-break fixture so the impulse bypass doesn't fire
-    history = _bos_history_moderate_break(price_above=103.5)
+    history = _bos_history_moderate_break(price_above=104.0)
 
     # Patch beta.compute_alpha_z so we don't depend on real returns
     with patch("radar.suppression.beta.compute_alpha_z", return_value=(0.5, 1.0)):
@@ -255,39 +260,43 @@ def test_btc_beta_drops_low_alpha_crypto(tmp_db):
     assert reason == "pure_btc_beta"
 
 
-def _bos_history_moderate_break(price_above: float = 103.5):
-    """In-progress bar breaks the swing high with range between 1.5x and 2.5x
-    median — passes BOS but does NOT trigger the impulse bypass."""
+def _bos_history_moderate_break(price_above: float = 104.5):
+    """In-progress 1h bar breaks the 4h swing high with range between 2.0x and
+    2.5x median — passes BOS-confirmation but does NOT trigger impulse bypass."""
     from radar.storage import Bar
     bars: list[Bar] = []
-    for i in range(60):
-        if i == 20:
+    for i in range(_HIST_LEN):
+        if i == _PIVOT_HOUR:
             bars.append(Bar(ticker="X", ts=i * 3600, high=100.0, low=99.0,
                             close=99.5, volume=0, oi=0, funding=0))
         else:
             bars.append(Bar(ticker="X", ts=i * 3600, high=92.0, low=90.0,
                             close=91.0, volume=0, oi=0, funding=0))
-    # range = price_above - 99.5 ≈ 4 when price_above=103.5
-    # median = 2 → 2.0x (clears BOS at 1.5x, below impulse at 2.5x)
-    bars[-1] = Bar(ticker="X", ts=59 * 3600, open=99.5, high=price_above,
-                   low=99.5, close=price_above, volume=0, oi=0, funding=0)
+    # range = price_above - 99.5 ≈ 5.0 when price_above=104.5; median 1h ≈ 2.0
+    # → 2.5x (clears 2.0x BOS-confirmation, below 2.5x impulse-bypass — actually
+    # right at the boundary; we use price_above=104.5 → range 5.0, ratio 2.5x
+    # exclusive). Tests using this fixture verify the BTC-beta gate fires.
+    bars[-1] = Bar(ticker="X", ts=(_HIST_LEN - 1) * 3600, open=99.5,
+                   high=price_above, low=99.5, close=price_above,
+                   volume=0, oi=0, funding=0)
     return bars
 
 
 def _bos_history_impulse_break(price_above: float = 110.0):
-    """History where the in-progress bar is a HUGE impulse (range >> median)."""
+    """History where the in-progress 1h bar is a HUGE impulse (range >> median)."""
     from radar.storage import Bar
     bars: list[Bar] = []
-    for i in range(60):
-        if i == 20:
+    for i in range(_HIST_LEN):
+        if i == _PIVOT_HOUR:
             bars.append(Bar(ticker="X", ts=i * 3600, high=100.0, low=99.0,
                             close=99.5, volume=0, oi=0, funding=0))
         else:
             bars.append(Bar(ticker="X", ts=i * 3600, high=92.0, low=91.5,
                             close=91.8, volume=0, oi=0, funding=0))
-    # in-progress bar with HUGE range (5 wide vs ~0.5 median) — clear impulse
-    bars[-1] = Bar(ticker="X", ts=59 * 3600, open=91.0, high=price_above,
-                   low=91.0, close=price_above, volume=0, oi=0, funding=0)
+    # in-progress bar with HUGE range (19 wide vs ~0.5 median) — clear impulse
+    bars[-1] = Bar(ticker="X", ts=(_HIST_LEN - 1) * 3600, open=91.0,
+                   high=price_above, low=91.0, close=price_above,
+                   volume=0, oi=0, funding=0)
     return bars
 
 
@@ -311,11 +320,11 @@ def test_btc_beta_bypassed_on_impulse_break(tmp_db):
 
 
 def test_btc_beta_still_drops_normal_break_with_weak_alpha(tmp_db):
-    """A non-impulse BOS (just barely 1.5x median) still gets the BTC-beta filter."""
-    market = _market("ETH", asset_class="crypto_t1", price=103.5)
+    """A non-impulse BOS (just barely 2.0x median) still gets the BTC-beta filter."""
+    market = _market("ETH", asset_class="crypto_t1", price=104.0)
     alert = _alert("ETH", asset_class="crypto_t1",
                    alpha_z=0.5, r_alpha_pct=1.0, direction="long")
-    history = _bos_history_moderate_break(price_above=103.5)
+    history = _bos_history_moderate_break(price_above=104.0)
 
     with patch("radar.suppression.beta.compute_alpha_z", return_value=(0.5, 1.0)):
         decision, reason, _ = suppression.evaluate(market, alert, history)

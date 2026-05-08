@@ -50,7 +50,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Iterable
 
-from . import beta, classifier, config, ranker, storage, suppression
+from . import beta, classifier, config, ranker, storage, suppression, trade_plan
 from .catalysts import NewsItem
 from .suppression import Alert
 from .timefmt import fmt_cdt
@@ -189,7 +189,11 @@ def make_replay_fetcher(
 
 # ============ default emit handler ============
 
-def _default_emit(alert: Alert, classification: Any | None) -> None:
+def _default_emit(
+    alert: Alert,
+    classification: Any | None,
+    plan: Any | None = None,
+) -> None:
     when = fmt_cdt(storage._now(), "%Y-%m-%d %H:%M %Z")
     summary = ""
     if classification is not None:
@@ -198,11 +202,19 @@ def _default_emit(alert: Alert, classification: Any | None) -> None:
             f"/{getattr(classification, 'direction', '?')}"
             f" conf={getattr(classification, 'confidence', 0.0):.2f}"
         )
+    plan_str = ""
+    if plan is not None:
+        plan_str = (
+            f" | PLAN {plan.direction.upper()} entry={plan.entry:.4f} "
+            f"stop={plan.stop:.4f} tp1={plan.tp1:.4f} ({plan.r_multiple_tp1:.1f}R) "
+            f"tp2={plan.tp2:.4f} ({plan.r_multiple_tp2:.1f}R) "
+            f"risk={plan.risk_per_unit:.4f}"
+        )
     log.info(
-        "%s  EMIT  %s (%s)  score=%.2f  α-z=%s  r_α=%.2f%%%s",
+        "%s  EMIT  %s (%s)  score=%.2f  α-z=%s  r_α=%.2f%%%s%s",
         when, alert.ticker, alert.asset_class, alert.score,
         f"{alert.alpha_z:.2f}" if alert.alpha_z != float("inf") else "inf",
-        alert.r_alpha_pct, summary,
+        alert.r_alpha_pct, summary, plan_str,
     )
 
 
@@ -375,17 +387,32 @@ def replay(
                 # The new evaluate signature wants Bar-shaped history. Pull
                 # it from the replay DB (recent_bars now returns list[Bar]).
                 bar_history = storage.recent_bars(
-                    market.ticker, hours=config.SWING_LOOKBACK_HOURS * 2,
+                    market.ticker, hours=config.BOS_BAR_HISTORY_HOURS,
                     db_path=db_path,
                 )
-                decision, reason, _metadata = suppression.evaluate(market, alert, bar_history)
+                decision, reason, metadata = suppression.evaluate(market, alert, bar_history)
                 # WATCHLIST decisions are recorded but don't fire — neither emitted nor dropped.
                 storage.record_alert(alert, decision=decision, reason=reason,
                                      classifier=cls, db_path=db_path)
                 if decision == "EMIT":
                     counts["emitted"] += 1
+                    # Prefer the classifier's direction (validated against the
+                    # structural break in Rule 0); fall back to the structural
+                    # direction so replays with --no-classify still build a plan.
+                    plan_direction = (
+                        str(getattr(cls, "direction", "") or "")
+                        or str(metadata.get("structure_direction") or "")
+                    )
+                    plan = trade_plan.compute_plan(
+                        market, bar_history, metadata, direction=plan_direction,
+                    )
                     try:
-                        emit_fn(alert, cls)
+                        # Older emit handlers don't accept the plan kwarg —
+                        # try with it first and fall back if so.
+                        try:
+                            emit_fn(alert, cls, plan)
+                        except TypeError:
+                            emit_fn(alert, cls)
                     except Exception as e:
                         log.warning("emit handler raised: %s", e)
                 else:

@@ -120,6 +120,7 @@ def evaluate(
     )
     metadata = {
         "breakout_level": breakout_level,
+        "structure_direction": structure_dir,
         "swing_high_reference": swing_high_ref,
         "swing_low_reference": swing_low_ref,
         "swing_reference_timestamp": swing_ts,
