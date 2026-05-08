@@ -22,7 +22,7 @@ def _market(ticker: str = "AMD", asset_class: str = "equity",
         asset_class=asset_class,
         market_id=ticker,
         max_leverage=10.0,
-        price=price,i
+        price=price,
         volume_24h_usd=1_500_000,
         oi_usd=500_000,
         funding_1h=0.0001,
