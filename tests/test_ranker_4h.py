@@ -1,4 +1,4 @@
-/co"""Tests for 4h-frame BOS detection (Phase 1 multi-timeframe).
+"""Tests for 4h-frame BOS detection (Phase 1 multi-timeframe).
 nte
 Covers:
   - 4h bar synthesis from UTC-aligned 1h bars
