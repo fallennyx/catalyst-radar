@@ -156,10 +156,7 @@ def fetch_crypto_binance(ticker: str, days: int, end_ts: int | None = None) -> l
     1000-candle chunks. No auth required; rate limit is 6000 weight/min,
     each klines call is weight 2.
     """
-    sym = BINANCE_SYMBOLS.get(ticker)
-    if not sym:
-        log.warning("no Binance symbol mapping for %s — caller will fall back", ticker)
-        return []
+    sym = BINANCE_SYMBOLS.get(ticker) or f"{ticker}USDT"
     s = _session()
     if s is None:
         return []
@@ -249,6 +246,203 @@ def fetch_crypto_binance(ticker: str, days: int, end_ts: int | None = None) -> l
         closes_24h.append((h, close))
 
     log.info("binance %s (%s): %d hourly bars", ticker, sym, len(rows))
+    return rows
+
+
+def fetch_crypto_coinbase(ticker: str, days: int, end_ts: int | None = None) -> list[dict]:
+    """Fetch hourly OHLCV from Coinbase Exchange public API.
+
+    Public, no auth, real OHLC, US-accessible. The endpoint returns at most
+    300 candles per call; we page in 300-hour windows.
+
+    Product format: ``BTC-USD``. Memes that Coinbase prices in a ``-USD`` pair
+    work directly; price-scaled symbols like ``1000PEPE`` are normalized to
+    ``PEPE-USD`` (and the row scale will be different from Binance — fine for
+    BOS detection since only relative moves matter).
+    """
+    s = _session()
+    if s is None:
+        return []
+    raw_ticker = ticker.upper().lstrip("0")
+    if raw_ticker.startswith("1000"):
+        raw_ticker = raw_ticker[4:]
+    product = f"{raw_ticker}-USD"
+    asset_class = config.SYMBOL_TO_CLASS.get(ticker, "crypto_t2")
+
+    end = int(end_ts) if end_ts is not None else int(time.time())
+    start = end - days * 86400
+    granularity = 3600
+    window_secs = 300 * granularity  # 300 candles per request
+
+    all_candles: list[list] = []
+    cursor = start
+    while cursor < end:
+        chunk_end = min(cursor + window_secs, end)
+        try:
+            r = s.get(
+                f"https://api.exchange.coinbase.com/products/{product}/candles",
+                params={
+                    "start": _iso(cursor),
+                    "end": _iso(chunk_end),
+                    "granularity": granularity,
+                },
+                timeout=15,
+            )
+        except Exception as e:
+            log.warning("coinbase %s request failed: %s", ticker, e)
+            break
+        if r.status_code == 404:
+            log.info("coinbase %s: product not listed (404)", product)
+            return []
+        if r.status_code != 200:
+            log.warning("coinbase %s returned %d: %s", ticker, r.status_code, r.text[:160])
+            break
+        try:
+            chunk = r.json()
+        except ValueError:
+            log.warning("coinbase %s returned non-JSON", ticker)
+            break
+        if not isinstance(chunk, list) or not chunk:
+            cursor = chunk_end
+            continue
+        all_candles.extend(chunk)
+        cursor = chunk_end
+
+    # Coinbase candles are [time, low, high, open, close, volume], DESC order.
+    all_candles.sort(key=lambda c: c[0])
+    rows: list[dict] = []
+    last_close: float | None = None
+    closes_24h: list[tuple[int, float]] = []
+    for c in all_candles:
+        try:
+            h = _floor_hour(int(c[0]))
+            low = float(c[1])
+            high = float(c[2])
+            open_ = float(c[3])
+            close = float(c[4])
+            volume = float(c[5])  # base-asset volume; convert to USD via close
+        except (TypeError, ValueError, IndexError):
+            continue
+        usd_vol = volume * close
+
+        pct_1h = ((close - last_close) / last_close * 100.0) if last_close else 0.0
+        pct_24h = 0.0
+        cutoff_24h = h - 24 * 3600
+        for prev_h, prev_close in reversed(closes_24h):
+            if prev_h <= cutoff_24h:
+                pct_24h = ((close - prev_close) / prev_close * 100.0) if prev_close else 0.0
+                break
+
+        rows.append({
+            "ts": _iso(h),
+            "ticker": ticker,
+            "asset_class": asset_class,
+            "max_leverage": 10,
+            "open": open_, "high": high, "low": low, "price": close,
+            "volume_24h_usd": usd_vol,
+            "oi_usd": 0, "funding_1h": 0,
+            "pct_24h": round(pct_24h, 4), "pct_1h": round(pct_1h, 4),
+        })
+        last_close = close
+        closes_24h.append((h, close))
+
+    log.info("coinbase %s (%s): %d hourly bars", ticker, product, len(rows))
+    return rows
+
+
+def fetch_crypto_bybit(ticker: str, days: int, end_ts: int | None = None) -> list[dict]:
+    """Fetch hourly OHLCV from Bybit v5 public kline API.
+
+    No auth, free, US-accessible for public market data. Bybit USDT-perp
+    symbols match Binance for most tickers (``BTCUSDT``, ``1000PEPEUSDT``).
+    Max 1000 candles per request; we page in 1000-hour windows.
+    """
+    s = _session()
+    if s is None:
+        return []
+    sym = BINANCE_SYMBOLS.get(ticker) or f"{ticker}USDT"  # same convention
+    asset_class = config.SYMBOL_TO_CLASS.get(ticker, "crypto_t2")
+
+    end_ms = (int(end_ts) if end_ts is not None else int(time.time())) * 1000
+    start_ms = end_ms - days * 86400 * 1000
+
+    all_klines: list[list] = []
+    cursor = start_ms
+    while cursor < end_ms:
+        chunk_end = min(cursor + 1000 * 3600 * 1000, end_ms)
+        try:
+            r = s.get(
+                "https://api.bybit.com/v5/market/kline",
+                params={
+                    "category": "linear",
+                    "symbol": sym,
+                    "interval": "60",
+                    "start": cursor,
+                    "end": chunk_end,
+                    "limit": 1000,
+                },
+                timeout=15,
+            )
+        except Exception as e:
+            log.warning("bybit %s request failed: %s", ticker, e)
+            break
+        if r.status_code != 200:
+            log.warning("bybit %s returned %d: %s", ticker, r.status_code, r.text[:160])
+            break
+        try:
+            data = r.json()
+        except ValueError:
+            log.warning("bybit %s returned non-JSON", ticker)
+            break
+        ret_code = data.get("retCode")
+        if ret_code not in (0, "0"):
+            log.info("bybit %s retCode=%s msg=%s", ticker, ret_code, data.get("retMsg"))
+            return []
+        chunk = (data.get("result") or {}).get("list") or []
+        if not chunk:
+            cursor = chunk_end
+            continue
+        all_klines.extend(chunk)
+        cursor = chunk_end
+
+    # Bybit kline: [startTime_ms, open, high, low, close, volume, turnover], DESC
+    all_klines.sort(key=lambda k: int(k[0]))
+    rows: list[dict] = []
+    last_close: float | None = None
+    closes_24h: list[tuple[int, float]] = []
+    for k in all_klines:
+        try:
+            h = _floor_hour(int(k[0]) // 1000)
+            open_ = float(k[1])
+            high = float(k[2])
+            low = float(k[3])
+            close = float(k[4])
+            turnover = float(k[6])  # quote (USDT) volume
+        except (TypeError, ValueError, IndexError):
+            continue
+
+        pct_1h = ((close - last_close) / last_close * 100.0) if last_close else 0.0
+        pct_24h = 0.0
+        cutoff_24h = h - 24 * 3600
+        for prev_h, prev_close in reversed(closes_24h):
+            if prev_h <= cutoff_24h:
+                pct_24h = ((close - prev_close) / prev_close * 100.0) if prev_close else 0.0
+                break
+
+        rows.append({
+            "ts": _iso(h),
+            "ticker": ticker,
+            "asset_class": asset_class,
+            "max_leverage": 10,
+            "open": open_, "high": high, "low": low, "price": close,
+            "volume_24h_usd": turnover,
+            "oi_usd": 0, "funding_1h": 0,
+            "pct_24h": round(pct_24h, 4), "pct_1h": round(pct_1h, 4),
+        })
+        last_close = close
+        closes_24h.append((h, close))
+
+    log.info("bybit %s (%s): %d hourly bars", ticker, sym, len(rows))
     return rows
 
 
@@ -440,14 +634,23 @@ def fetch_yfinance_hourly(ticker: str, days: int, end_ts: int | None = None) -> 
 # ============ routing ============
 
 def fetch_crypto(ticker: str, days: int, end_ts: int | None = None) -> list[dict]:
-    """Crypto router: try Binance (real OHLCV) first, fall back to CoinGecko
-    for tickers Binance doesn't list (HYPE on Hyperliquid, MOG, etc.).
+    """Crypto router with US-friendly fallback chain: Coinbase → Bybit → Binance → CoinGecko.
+
+    Coinbase Exchange public API and Bybit v5 are both free, US-accessible, and
+    return real OHLC (vs CoinGecko's synthesized hourly). Binance is kept as
+    a third try for environments where it isn't geo-blocked. CoinGecko is the
+    final fallback for long-tail tokens.
     """
-    if ticker in BINANCE_SYMBOLS:
-        rows = fetch_crypto_binance(ticker, days, end_ts=end_ts)
-        if rows:
-            return rows
-        log.info("binance returned 0 rows for %s — falling back to CoinGecko", ticker)
+    rows = fetch_crypto_coinbase(ticker, days, end_ts=end_ts)
+    if rows:
+        return rows
+    rows = fetch_crypto_bybit(ticker, days, end_ts=end_ts)
+    if rows:
+        return rows
+    rows = fetch_crypto_binance(ticker, days, end_ts=end_ts)
+    if rows:
+        return rows
+    log.info("all real-OHLC sources empty for %s — falling back to CoinGecko (synthesized)", ticker)
     return fetch_crypto_hourly(ticker, days, end_ts=end_ts)
 
 
@@ -475,18 +678,19 @@ def fetch_universe(
     else:
         targets = [t.strip().upper() for t in tickers if t.strip()]
 
+    from . import lighter  # local import to avoid cycles
     rows: list[dict] = []
     for ticker in targets:
-        cls = config.SYMBOL_TO_CLASS.get(ticker)
-        if not cls:
-            log.warning("ticker %s not in ASSET_CLASSES — skipping", ticker)
-            continue
+        cls = config.SYMBOL_TO_CLASS.get(ticker) or lighter.classify(ticker)
         fetcher = ROUTES.get(cls)
         if fetcher is None:
-            log.warning("no fetcher for asset_class=%s (%s)", cls, ticker)
+            log.warning("no fetcher for asset_class=%s (%s) — skipping", cls, ticker)
             continue
         try:
-            rows.extend(fetcher(ticker, days, end_ts=end_ts))
+            fetched = fetcher(ticker, days, end_ts=end_ts)
+            for r in fetched:
+                r["asset_class"] = cls
+            rows.extend(fetched)
         except Exception as e:
             log.warning("%s fetch blew up: %s", ticker, e)
         time.sleep(sleep_between)  # be polite to free APIs

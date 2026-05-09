@@ -25,8 +25,8 @@ from typing import Any
 from dotenv import load_dotenv
 
 from . import (
-    beta, catalysts, classifier, config, ranker, storage,
-suppression, telegram, trade_plan, universe,
+    beta, catalysts, classifier, config, predictor, ranker, storage,
+    suppression, telegram, trade_plan, universe,
 )
 from .suppression import Alert
 
@@ -135,6 +135,33 @@ async def run_discovery_cycle() -> None:
 
     for market, score in candidates:
         try:
+            # Cost gate: skip the LLM call when this candidate has no chance
+            # of EMITting *or* hitting the watchlist. A candidate is "hopeless"
+            # iff (a) no 4h structural break confirmed and (b) score below the
+            # watchlist threshold. This drops ~70-90% of LLM calls in practice
+            # without changing the suppression chain's verdicts.
+            bar_history = storage.recent_bars(
+                market.ticker, hours=config.BOS_BAR_HISTORY_HOURS,
+            )
+            has_bos = False
+            if bar_history:
+                try:
+                    has_bos, _bk_lvl, _bk_dir = ranker.has_breakout_structure(
+                        market, bar_history, market.price,
+                    )
+                except Exception:
+                    has_bos = False
+            if (config.SKIP_CLASSIFIER_IF_HOPELESS
+                    and not has_bos
+                    and score < config.WATCHLIST_SCORE_THRESHOLD):
+                # Will drop on Rule 0 `no_structure_break` regardless of catalyst.
+                alert = build_alert(market, None, histories.get(market.ticker, {}),
+                                    btc_rets=btc_rets, score=score)
+                storage.record_alert(alert, decision="DROP",
+                                     reason="no_structure_break",
+                                     classifier=None)
+                continue
+
             news = catalysts.fetch_for_market(market, lookback_hours=config.NEWS_LOOKBACK_HOURS)
             result = classifier.classify(market, news)
             if result is None:
@@ -172,6 +199,32 @@ async def run_discovery_cycle() -> None:
                     market, bar_history, metadata,
                     direction=str(getattr(result, "direction", "") or ""),
                 )
+                # ---- Stage 2 enrichment ----
+                pred = None
+                if config.STAGE2_ENABLED and plan is not None and result is not None:
+                    btc_hist = storage.recent_bars(
+                        "BTC", hours=config.STAGE2_BAR_HISTORY_HOURS,
+                    )
+                    try:
+                        pred = predictor.analyze(
+                            market, result, plan, metadata,
+                            bar_history, btc_hist, news, prior_alerts=[],
+                        )
+                    except Exception as e:
+                        log.warning("Stage 2 crashed for %s: %s", market.ticker, e)
+                        pred = None
+                if pred is not None and pred.verdict == "DROP":
+                    log.info("Tier 1 → Stage 2 DROP %s: %s", market.ticker, pred.thesis[:160])
+                    storage.record_alert(alert, decision="DROP",
+                                         reason="stage2_drop", classifier=result)
+                    continue
+                if pred is not None and pred.verdict == "DOWNGRADE_TO_WATCHLIST":
+                    log.info("Tier 1 → Stage 2 DOWNGRADE %s: %s",
+                             market.ticker, pred.thesis[:160])
+                    storage.record_alert(alert, decision="WATCHLIST",
+                                         reason="stage2_downgrade", classifier=result)
+                    continue
+                metadata = {**metadata, "predictor_result": pred}
                 telegram.send_bos_alert(
                     market, result, metadata,
                     source="tier1_immediate", plan=plan,

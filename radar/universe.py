@@ -155,19 +155,24 @@ def get_leveraged_universe(force: bool = False) -> list[Market]:
         return list(_CACHE["markets"])
 
     lighter_markets = lighter.fetch_universe(force=force)
+    # /orderBooks gives metadata only — no live prices. Merge in /exchangeStats
+    # for last_trade_price, 24h volume, and 24h % change. Without this the
+    # ranker sees price=0 for every ticker and never produces candidates.
+    stats_by_symbol = lighter.fetch_market_stats()
     markets: list[Market] = []
     for lm in lighter_markets:
+        s = stats_by_symbol.get(lm.symbol, {})
         markets.append(Market(
             ticker=lm.symbol,
             asset_class=lm.asset_class,
             market_id=str(lm.market_id),
             max_leverage=10.0,  # Lighter perps are always leveraged; orderBooks doesn't expose max
-            price=0.0,
-            volume_24h_usd=0.0,
-            oi_usd=0.0,
-            funding_1h=0.0,
-            pct_24h=0.0,
-            pct_1h=0.0,
+            price=float(s.get("last_trade_price") or 0.0),
+            volume_24h_usd=float(s.get("daily_quote_token_volume") or 0.0),
+            oi_usd=0.0,                        # not exposed on /exchangeStats
+            funding_1h=0.0,                    # not exposed; can be added if Lighter ships an endpoint
+            pct_24h=float(s.get("daily_price_change") or 0.0),
+            pct_1h=0.0,                        # derived from bar history downstream
             raw=lm.raw or {},
         ))
 

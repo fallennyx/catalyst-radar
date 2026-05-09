@@ -9,9 +9,15 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from radar import classifier
+from radar import classifier, config
 from radar.catalysts import NewsItem
 from radar.universe import Market
+
+
+@pytest.fixture(autouse=True)
+def _pin_anthropic_provider(monkeypatch):
+    """These tests stub the Anthropic-style client. Force the legacy path."""
+    monkeypatch.setattr(config, "LLM_PROVIDER", "anthropic")
 
 
 def _market():

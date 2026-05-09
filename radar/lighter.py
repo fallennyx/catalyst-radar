@@ -175,6 +175,72 @@ def live_symbol_to_class() -> dict[str, str]:
     return {m.symbol: m.asset_class for m in fetch_universe()}
 
 
+# ============ live market stats ============
+
+_STATS_CACHE: dict[str, Any] = {"ts": 0.0, "by_symbol": {}}
+
+
+def fetch_market_stats(timeout: int = 15) -> dict[str, dict[str, float]]:
+    """Hit Lighter's `/exchangeStats` endpoint for live mark prices, 24h volume,
+    and 24h price change per symbol.
+
+    Cached 30 seconds (faster than the universe metadata cache because prices
+    move). Returns a dict keyed by symbol with float fields:
+
+        {
+            "BTC": {
+                "last_trade_price": 81234.5,
+                "daily_quote_token_volume": 12_345_678.9,
+                "daily_price_change": 2.34,    # percent, 24h
+            },
+            ...
+        }
+
+    On API failure returns the last-good cache (possibly empty).
+    """
+    now = time.time()
+    if (now - _STATS_CACHE["ts"]) < 30 and _STATS_CACHE["by_symbol"]:
+        return dict(_STATS_CACHE["by_symbol"])
+    try:
+        import requests  # noqa: WPS433
+    except Exception as e:
+        log.warning("requests unavailable: %s", e)
+        return dict(_STATS_CACHE["by_symbol"])
+    try:
+        r = requests.get(
+            f"{LIGHTER_API}/exchangeStats",
+            timeout=timeout,
+            headers={"Accept": "application/json", "User-Agent": "catalyst-radar/0.1"},
+        )
+    except Exception as e:
+        log.warning("Lighter exchangeStats request failed: %s", e)
+        return dict(_STATS_CACHE["by_symbol"])
+    if r.status_code != 200:
+        log.warning("Lighter exchangeStats returned %d", r.status_code)
+        return dict(_STATS_CACHE["by_symbol"])
+    try:
+        data = r.json()
+    except ValueError:
+        return dict(_STATS_CACHE["by_symbol"])
+    rows = data.get("order_book_stats") or []
+    out: dict[str, dict[str, float]] = {}
+    for row in rows:
+        sym = (row.get("symbol") or "").upper().strip()
+        if not sym:
+            continue
+        try:
+            out[sym] = {
+                "last_trade_price": float(row.get("last_trade_price") or 0.0),
+                "daily_quote_token_volume": float(row.get("daily_quote_token_volume") or 0.0),
+                "daily_price_change": float(row.get("daily_price_change") or 0.0),
+            }
+        except (TypeError, ValueError):
+            continue
+    _STATS_CACHE["ts"] = now
+    _STATS_CACHE["by_symbol"] = out
+    return dict(out)
+
+
 def is_listed(ticker: str) -> bool:
     """True if `ticker` is currently listed on Lighter as an active perp."""
     if not ticker:

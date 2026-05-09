@@ -282,6 +282,131 @@ def _extract_tool_input(response: Any) -> dict[str, Any] | None:
     return None
 
 
+# ============ Gemini call (REST, no SDK) ============
+
+# Mirror of CLASSIFY_TOOL into Gemini's function-declaration schema. Gemini
+# accepts an OpenAPI subset; the 'enum' / 'maxLength' / 'minimum' constraints
+# from CLASSIFY_TOOL transfer 1:1.
+_GEMINI_FUNCTION_DECL = {
+    "name": "record_catalyst",
+    "description": (
+        "Record a structured catalyst classification for the candidate ticker. "
+        "Use ONLY information present in the supplied news bundle. Each evidence "
+        "quote MUST be an exact verbatim substring of one news item's title or body."
+    ),
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "catalyst_type": {
+                "type": "string",
+                "enum": sorted(VALID_CATALYST_TYPES),
+                "description": "Best-fit category. Use 'none' if there is no clear catalyst.",
+            },
+            "direction": {
+                "type": "string",
+                "enum": ["long", "neutral", "short"],
+                "description": "Implied directional bias of the catalyst.",
+            },
+            "confidence": {
+                "type": "number",
+                "description": "Model confidence in the classification (0–1).",
+            },
+            "summary": {
+                "type": "string",
+                "description": "One-sentence plain-English explanation, no jargon. Max 400 chars.",
+            },
+            "evidence_quotes": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": "Up to 3 verbatim short quotes from the news bundle.",
+            },
+            "is_actionable": {
+                "type": "boolean",
+                "description": "False if the catalyst is rumor-only, expired, or already priced in.",
+            },
+        },
+        "required": ["catalyst_type", "direction", "confidence", "summary", "is_actionable"],
+    },
+}
+
+
+def _classify_gemini(market: Market, news_items: list[NewsItem]) -> ClassifierResult | None:
+    """Call Gemini 2.5 Flash via REST. No SDK, no new dependency."""
+    api_key = os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
+    if not api_key:
+        log.warning("GEMINI_API_KEY not set — classifier will return None")
+        return None
+    try:
+        import requests  # noqa: WPS433
+    except Exception as e:
+        log.warning("requests unavailable for Gemini call: %s", e)
+        return None
+
+    url = (
+        f"https://generativelanguage.googleapis.com/v1beta/models/"
+        f"{config.GEMINI_MODEL}:generateContent?key={api_key}"
+    )
+    body = {
+        "systemInstruction": {"parts": [{"text": _SYSTEM_PROMPT}]},
+        "contents": [{
+            "role": "user",
+            "parts": [{"text": _build_user_prompt(market, news_items)}],
+        }],
+        "tools": [{"functionDeclarations": [_GEMINI_FUNCTION_DECL]}],
+        "toolConfig": {
+            "functionCallingConfig": {
+                "mode": "ANY",
+                "allowedFunctionNames": ["record_catalyst"],
+            }
+        },
+        "generationConfig": {
+            "temperature": config.GEMINI_TEMPERATURE,
+            "maxOutputTokens": config.GEMINI_MAX_TOKENS,
+        },
+    }
+
+    try:
+        r = requests.post(url, json=body, timeout=20)
+    except Exception as e:
+        log.warning("Gemini call failed for %s: %s", market.ticker, e)
+        return None
+    if r.status_code != 200:
+        log.warning("Gemini returned %d for %s: %s", r.status_code, market.ticker, r.text[:200])
+        return None
+    try:
+        payload = r.json()
+    except ValueError:
+        log.warning("Gemini returned non-JSON for %s", market.ticker)
+        return None
+
+    # Gemini surfaces function calls inside candidates[0].content.parts[*].functionCall
+    candidates = payload.get("candidates") or []
+    args: dict | None = None
+    for cand in candidates:
+        for part in (cand.get("content") or {}).get("parts") or []:
+            fc = part.get("functionCall")
+            if fc and fc.get("name") == "record_catalyst":
+                args = fc.get("args") or {}
+                break
+        if args is not None:
+            break
+    if args is None:
+        log.warning("Gemini: no functionCall in response for %s", market.ticker)
+        return None
+
+    try:
+        result = ClassifierResult(**args)
+    except ValidationError as e:
+        log.warning("Gemini classifier: pydantic validation failed for %s: %s", market.ticker, e)
+        return None
+
+    corpus = _build_news_corpus(news_items)
+    if not _validate_quotes(result.evidence_quotes, corpus):
+        log.info("Gemini classifier: dropped %s — fabricated evidence quote", market.ticker)
+        return None
+    return result
+
+
 # ============ substring validator ============
 
 def _build_news_corpus(items: Iterable[NewsItem]) -> str:
@@ -318,6 +443,12 @@ def classify(market: Market, news_items: list[NewsItem]) -> ClassifierResult | N
             is_actionable=False,
         )
 
+    # Route by configured provider. Gemini is the cheapest-tier default;
+    # Anthropic Haiku is the no-key fallback / opt-in path.
+    if config.LLM_PROVIDER == "gemini":
+        return _classify_gemini(market, news_items)
+
+    # ---- Anthropic Haiku path (legacy / fallback) ----
     client = _client()
     if client is None:
         return None

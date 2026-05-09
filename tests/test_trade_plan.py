@@ -244,3 +244,74 @@ def test_tp2_ignores_pivots_inside_tp1():
     # Should fall back to 3R since the only pivot is inside TP1
     assert plan.tp2 == pytest.approx(100.0 + 3.0 * plan.risk_per_unit)
     assert plan.r_multiple_tp2 == pytest.approx(3.0)
+
+
+# ============================================================================
+# Multi-stage exit ladder (improvement #3) — scale-out, breakeven, ATR trail
+# ============================================================================
+
+def _bars_with_volatility(n: int = 30, close: float = 90.0,
+                          range_width: float = 0.5) -> list[Bar]:
+    """Bars with non-zero range so ATR is computable."""
+    return [
+        Bar(ticker="X", ts=i * 3600,
+            open=close - range_width / 2,
+            high=close + range_width / 2,
+            low=close - range_width / 2,
+            close=close, volume=0, oi=0, funding=0)
+        for i in range(n)
+    ]
+
+
+def test_plan_emits_scale_out_fractions():
+    market = _market(price=110.0)
+    metadata = {"breakout_level": 100.0}
+    plan = trade_plan.compute_plan(market, _bars_with_volatility(), metadata, "long")
+    assert plan is not None
+    assert plan.tp1_fraction == pytest.approx(config.TP1_FRACTION)
+    assert plan.tp2_fraction == pytest.approx(config.TP2_FRACTION)
+    # Runner = 1 - tp1 - tp2 fractions
+    assert plan.runner_fraction == pytest.approx(
+        1.0 - config.TP1_FRACTION - config.TP2_FRACTION,
+    )
+
+
+def test_plan_breakeven_trigger_long_is_one_R_above_entry():
+    market = _market(price=110.0)
+    metadata = {"breakout_level": 100.0}
+    plan = trade_plan.compute_plan(market, _bars_with_volatility(), metadata, "long")
+    assert plan is not None
+    expected = 110.0 + config.BREAKEVEN_TRIGGER_R * plan.risk_per_unit
+    assert plan.breakeven_trigger == pytest.approx(expected)
+
+
+def test_plan_breakeven_trigger_short_is_one_R_below_entry():
+    market = _market(price=90.0)
+    metadata = {"breakout_level": 100.0}
+    plan = trade_plan.compute_plan(market, _bars_with_volatility(close=110.0),
+                                   metadata, "short")
+    assert plan is not None
+    expected = 90.0 - config.BREAKEVEN_TRIGGER_R * plan.risk_per_unit
+    assert plan.breakeven_trigger == pytest.approx(expected)
+
+
+def test_plan_populates_atr_when_history_sufficient():
+    market = _market(price=110.0)
+    metadata = {"breakout_level": 100.0}
+    bars = _bars_with_volatility(n=30, range_width=0.5)
+    plan = trade_plan.compute_plan(market, bars, metadata, "long")
+    assert plan is not None
+    assert plan.trail_atr is not None and plan.trail_atr > 0
+    assert plan.trail_atr_mult == pytest.approx(config.TRAIL_ATR_MULT)
+    assert plan.has_runner is True
+
+
+def test_plan_omits_trail_when_history_too_short():
+    market = _market(price=110.0)
+    metadata = {"breakout_level": 100.0}
+    plan = trade_plan.compute_plan(market, _flat_history(n=5), metadata, "long")
+    # ATR-14 needs ≥15 bars; with 5 it's None, trail collapses
+    assert plan is not None
+    assert plan.trail_atr is None
+    assert plan.trail_atr_mult == 0.0
+    assert plan.has_runner is False

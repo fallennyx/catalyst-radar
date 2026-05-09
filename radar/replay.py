@@ -50,7 +50,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Iterable
 
-from . import beta, classifier, config, ranker, storage, suppression, trade_plan
+from . import beta, classifier, config, predictor, ranker, storage, suppression, trade_plan
 from .catalysts import NewsItem
 from .suppression import Alert
 from .timefmt import fmt_cdt
@@ -105,7 +105,7 @@ def load_bars(path: str | Path) -> dict[int, list[Market]]:
             ts = _floor_hour(_parse_ts(row["ts"]))
             ticker = row["ticker"].strip().upper()
             asset_class = row["asset_class"].strip()
-            if asset_class not in config.SYMBOL_TO_CLASS.values():
+            if asset_class not in config.VALID_ASSET_CLASSES:
                 log.warning("row %s: unknown asset_class %r — skipping", ticker, asset_class)
                 continue
             close = _safe_float(row.get("price"))
@@ -189,32 +189,114 @@ def make_replay_fetcher(
 
 # ============ default emit handler ============
 
+def _fmt_price(p: float) -> str:
+    """Adaptive price formatting — more decimals for sub-dollar tickers."""
+    if p == 0:
+        return "0"
+    ap = abs(p)
+    if ap >= 100:
+        return f"${p:,.2f}"
+    if ap >= 1:
+        return f"${p:.4f}"
+    if ap >= 0.01:
+        return f"${p:.4f}"
+    return f"${p:.8f}".rstrip("0")
+
+
+def _est_hours(distance: float, median_1h_range: float | None) -> str:
+    """Rough estimate of bars to target using median hourly range."""
+    if not median_1h_range or distance <= 0:
+        return "?"
+    h = distance / median_1h_range
+    if h < 1:
+        return "<1h"
+    if h < 24:
+        return f"~{int(round(h))}h"
+    return f"~{h/24:.1f}d"
+
+
 def _default_emit(
     alert: Alert,
     classification: Any | None,
     plan: Any | None = None,
+    context: dict | None = None,
 ) -> None:
-    when = fmt_cdt(storage._now(), "%Y-%m-%d %H:%M %Z")
-    summary = ""
-    if classification is not None:
-        summary = (
-            f" | {getattr(classification, 'catalyst_type', '?')}"
-            f"/{getattr(classification, 'direction', '?')}"
-            f" conf={getattr(classification, 'confidence', 0.0):.2f}"
+    when = fmt_cdt(storage._now(), "%Y-%m-%d %I:%M %p %Z")
+    if plan is None:
+        log.info("%s  %s (%s)  alert without plan", when, alert.ticker, alert.asset_class)
+        return
+
+    median_1h = (context or {}).get("median_bar_range")
+    breakout_level = (context or {}).get("breakout_level")
+    entry = plan.entry
+    direction = plan.direction.upper()
+
+    def pct(target: float) -> str:
+        if entry == 0:
+            return "?"
+        return f"{(target - entry) / entry * 100:+.2f}%"
+
+    tp1_hours = _est_hours(abs(plan.tp1 - entry), median_1h)
+    tp2_hours = _est_hours(abs(plan.tp2 - entry), median_1h)
+
+    bos_str = ""
+    if breakout_level:
+        side = "above" if direction == "LONG" else "below"
+        bos_str = f"  (broke 4h swing {side} {_fmt_price(breakout_level)})"
+
+    catalyst_str = ""
+    if classification is not None and getattr(classification, "catalyst_type", "none") != "none":
+        catalyst_str = (
+            f"\n    Catalyst: {classification.catalyst_type} — {getattr(classification, 'summary', '')[:120]}"
         )
-    plan_str = ""
-    if plan is not None:
-        plan_str = (
-            f" | PLAN {plan.direction.upper()} entry={plan.entry:.4f} "
-            f"stop={plan.stop:.4f} tp1={plan.tp1:.4f} ({plan.r_multiple_tp1:.1f}R) "
-            f"tp2={plan.tp2:.4f} ({plan.r_multiple_tp2:.1f}R) "
-            f"risk={plan.risk_per_unit:.4f}"
+
+    # Stage 2 enrichment — print thesis / kill / horizon / risks under the plan.
+    pred = (context or {}).get("predictor_result")
+    pred_str = ""
+    if pred is not None:
+        risks_line = ""
+        if pred.risks:
+            risks_line = "\n    Risks: " + " | ".join(r[:80] for r in pred.risks)
+        pred_str = (
+            f"\n    [Stage 2 verdict={pred.verdict} dir_conf={pred.direction_confidence:.2f}"
+            f" quality={pred.setup_quality:.2f} horizon={pred.expected_horizon} "
+            f"~{pred.expected_r_multiple:.1f}R]"
+            f"\n    Thesis: {pred.thesis}"
+            f"\n    Kill: {pred.kill_signal}"
+            f"\n    Entry: {pred.entry_guidance}"
+            f"{risks_line}"
         )
+
+    # Multi-stage ladder additions (improvement #3). Renders only when fields
+    # are populated; old callers without scale fractions still see TP1/TP2.
+    tp1_frac = getattr(plan, "tp1_fraction", 0.0) or 0.0
+    tp2_frac = getattr(plan, "tp2_fraction", 0.0) or 0.0
+    runner_frac = getattr(plan, "runner_fraction", 0.0) or 0.0
+    trail_atr = getattr(plan, "trail_atr", None)
+    trail_mult = getattr(plan, "trail_atr_mult", 0.0) or 0.0
+    breakeven = getattr(plan, "breakeven_trigger", None)
+    tp1_extra = f", close {int(round(tp1_frac*100))}%" if tp1_frac else ""
+    if tp1_frac and breakeven is not None:
+        tp1_extra += " → stop to entry"
+    tp2_extra = f", close {int(round(tp2_frac*100))}%" if tp2_frac else ""
+    trail_str = ""
+    if trail_atr and trail_mult > 0 and runner_frac > 0:
+        td = float(trail_atr) * trail_mult
+        trail_str = (
+            f"\n    Trail {int(round(runner_frac*100))}% by {trail_mult:.1f}×ATR "
+            f"(~{_fmt_price(td)})"
+        )
+
     log.info(
-        "%s  EMIT  %s (%s)  score=%.2f  α-z=%s  r_α=%.2f%%%s%s",
-        when, alert.ticker, alert.asset_class, alert.score,
-        f"{alert.alpha_z:.2f}" if alert.alpha_z != float("inf") else "inf",
-        alert.r_alpha_pct, summary, plan_str,
+        "%s  %s (%s)  %s  entry %s%s\n"
+        "    Stop %s (%s)   Risk %s/unit\n"
+        "    TP1  %s (%s, %.1fR, %s%s)\n"
+        "    TP2  %s (%s, %.1fR, %s%s)%s%s",
+        when, alert.ticker, alert.asset_class, direction, _fmt_price(entry), bos_str,
+        _fmt_price(plan.stop), pct(plan.stop), _fmt_price(plan.risk_per_unit),
+        _fmt_price(plan.tp1), pct(plan.tp1), plan.r_multiple_tp1, tp1_hours, tp1_extra,
+        _fmt_price(plan.tp2), pct(plan.tp2), plan.r_multiple_tp2, tp2_hours, tp2_extra,
+        trail_str, catalyst_str + pred_str,
     )
 
 
@@ -406,13 +488,48 @@ def replay(
                     plan = trade_plan.compute_plan(
                         market, bar_history, metadata, direction=plan_direction,
                     )
-                    try:
-                        # Older emit handlers don't accept the plan kwarg —
-                        # try with it first and fall back if so.
+                    # Stage 2 reasoner — runs only when the classifier is on
+                    # AND a plan was buildable. Skipped under --no-classify.
+                    pred = None
+                    if classify and cls is not None and plan is not None and config.STAGE2_ENABLED:
+                        btc_hist = storage.recent_bars(
+                            "BTC", hours=config.STAGE2_BAR_HISTORY_HOURS, db_path=db_path,
+                        )
                         try:
-                            emit_fn(alert, cls, plan)
+                            pred = predictor.analyze(
+                                market, cls, plan, metadata,
+                                bar_history, btc_hist, news, prior_alerts=[],
+                            )
+                        except Exception as e:
+                            log.warning("predictor crashed for %s: %s", market.ticker, e)
+                            pred = None
+                        if pred is not None and pred.verdict in ("DOWNGRADE_TO_WATCHLIST", "DROP"):
+                            log.info(
+                                "Stage 2 %s for %s: %s",
+                                pred.verdict, market.ticker, pred.thesis[:160],
+                            )
+                            counts["emitted"] -= 1
+                            counts["dropped"] += 1
+                            storage.record_alert(
+                                alert, decision="DROP",
+                                reason=f"stage2_{pred.verdict.lower()}",
+                                classifier=cls, db_path=db_path,
+                            )
+                            continue
+                    context = {
+                        "breakout_level": metadata.get("breakout_level"),
+                        "median_bar_range": metadata.get("median_bar_range"),
+                        "structure_direction": metadata.get("structure_direction"),
+                        "predictor_result": pred,
+                    }
+                    try:
+                        try:
+                            emit_fn(alert, cls, plan, context)
                         except TypeError:
-                            emit_fn(alert, cls)
+                            try:
+                                emit_fn(alert, cls, plan)
+                            except TypeError:
+                                emit_fn(alert, cls)
                     except Exception as e:
                         log.warning("emit handler raised: %s", e)
                 else:

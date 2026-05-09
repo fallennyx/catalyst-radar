@@ -15,7 +15,7 @@ import logging
 from dataclasses import dataclass
 from typing import Any
 
-from . import config
+from . import config, ranker
 
 log = logging.getLogger(__name__)
 
@@ -24,12 +24,30 @@ log = logging.getLogger(__name__)
 class TradePlan:
     direction: str           # "long" or "short"
     entry: float             # current close at alert time
-    stop: float              # broken swing level + small buffer
+    stop: float              # broken swing level + small buffer (initial stop)
     tp1: float               # 1.5R from entry
     tp2: float               # next prior swing OR 3R, whichever is closer
     risk_per_unit: float     # |entry - stop|
     r_multiple_tp1: float    # favorable-direction reward, signed positive when target is profitable
     r_multiple_tp2: float
+
+    # ---- Multi-stage exit ladder (improvement #3) ----
+    # All optional with defaults so old call sites keep working.
+    tp1_fraction: float = 0.0          # close this fraction at TP1 (e.g., 0.33)
+    tp2_fraction: float = 0.0          # close this fraction at TP2
+    breakeven_trigger: float | None = None   # move stop to entry when price reaches this
+    trail_atr: float | None = None     # 14h ATR — base unit for the trail
+    trail_atr_mult: float = 0.0        # trailing distance = trail_atr * trail_atr_mult
+    runner_fraction: float = 0.0       # remaining fraction trailed after TP2
+
+    @property
+    def has_runner(self) -> bool:
+        """True when the plan has an ATR-trailed final tranche."""
+        return (
+            self.trail_atr is not None
+            and self.trail_atr > 0
+            and self.runner_fraction > 0
+        )
 
 
 def _find_next_swing_above(history: list, threshold: float) -> float | None:
@@ -134,6 +152,22 @@ def compute_plan(
         r_multiple_tp1 = (entry - tp1) / risk_per_unit
         r_multiple_tp2 = (entry - tp2) / risk_per_unit
 
+    # ---- Multi-stage exit ladder (#3) ----
+    # ATR drives the trailing stop on the final tranche. When ATR isn't
+    # computable (cold-start, tiny history) we omit the trail and the runner
+    # collapses; TP1/TP2 still fire as static targets.
+    atr_1h = ranker.compute_atr(history or [], period=int(config.ATR_PERIOD_HOURS))
+    tp1_fraction = float(config.TP1_FRACTION)
+    tp2_fraction = float(config.TP2_FRACTION)
+    runner_fraction = max(0.0, 1.0 - tp1_fraction - tp2_fraction)
+
+    if direction == "long":
+        breakeven_trigger = entry + float(config.BREAKEVEN_TRIGGER_R) * risk_per_unit
+    else:
+        breakeven_trigger = entry - float(config.BREAKEVEN_TRIGGER_R) * risk_per_unit
+
+    trail_atr_mult = float(config.TRAIL_ATR_MULT) if atr_1h else 0.0
+
     return TradePlan(
         direction=direction,
         entry=entry,
@@ -143,4 +177,10 @@ def compute_plan(
         risk_per_unit=risk_per_unit,
         r_multiple_tp1=r_multiple_tp1,
         r_multiple_tp2=r_multiple_tp2,
+        tp1_fraction=tp1_fraction,
+        tp2_fraction=tp2_fraction,
+        breakeven_trigger=breakeven_trigger,
+        trail_atr=atr_1h,
+        trail_atr_mult=trail_atr_mult,
+        runner_fraction=runner_fraction,
     )

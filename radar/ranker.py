@@ -388,6 +388,76 @@ def compute_median_range(bars: list) -> float:
     return ranges[len(ranges) // 2]
 
 
+def compute_median_volume(bars: list) -> float:
+    """Median volume over the provided bars. 0.0 if insufficient data."""
+    vols: list[float] = []
+    for b in bars:
+        v = getattr(b, "volume", None)
+        if v is None:
+            continue
+        vf = float(v)
+        if vf > 0:
+            vols.append(vf)
+    if not vols:
+        return 0.0
+    vols.sort()
+    return vols[len(vols) // 2]
+
+
+def compute_atr(bars: list, period: int = 14) -> float | None:
+    """Wilder's true-range mean over the last `period` bars.
+
+    Returns ``None`` if there are fewer than ``period + 1`` usable bars (we
+    need a previous close for each TR calculation).
+    """
+    if not bars or len(bars) < period + 1:
+        return None
+    trs: list[float] = []
+    prev_close: float | None = None
+    for b in bars:
+        h = getattr(b, "high", None)
+        l = getattr(b, "low", None)
+        c = getattr(b, "close", None)
+        if h is None or l is None or c is None:
+            prev_close = None
+            continue
+        h, l, c = float(h), float(l), float(c)
+        if prev_close is None:
+            prev_close = c
+            continue
+        tr = max(h - l, abs(h - prev_close), abs(prev_close - l))
+        trs.append(tr)
+        prev_close = c
+    if len(trs) < period:
+        return None
+    window = trs[-period:]
+    return sum(window) / len(window)
+
+
+def htf_trend_aligned(history: list, direction: str, lookback_hours: int) -> bool:
+    """Soft daily-trend filter using the median close over `lookback_hours`.
+
+    Long alerts must have current price strictly above the lookback median;
+    short alerts must have it strictly below. Returns True (aligned) when
+    insufficient history exists — we'd rather alert than over-filter on
+    cold-start.
+    """
+    if not history or lookback_hours <= 0:
+        return True
+    window = history[-lookback_hours:] if len(history) > lookback_hours else history
+    closes = [float(b.close) for b in window if getattr(b, "close", None) is not None]
+    if len(closes) < 24:  # need at least one day of context
+        return True
+    closes.sort()
+    median_close = closes[len(closes) // 2]
+    last_close = float(history[-1].close or 0.0)
+    if direction == "long":
+        return last_close > median_close
+    if direction == "short":
+        return last_close < median_close
+    return True
+
+
 def has_breakout_structure(
     market: Any,
     history: list,
@@ -425,6 +495,18 @@ def has_breakout_structure(
     if current_range <= config.RANGE_EXPANSION_MULTIPLIER * median_range_1h:
         return (False, None, None)
 
+    # ---- 1h volume confirmation ----
+    # A 2x range candle on dead volume is the textbook fakeout signature.
+    # Real breakouts are accompanied by elevated participation.
+    if config.REQUIRE_VOLUME_CONFIRMATION:
+        median_vol_1h = compute_median_volume(lookback_1h)
+        current_vol = float(getattr(current_bar, "volume", 0.0) or 0.0)
+        # If we have no usable volume data, don't block — some sources (early
+        # CoinGecko fallback) emit zero volumes. Trust range alone in that case.
+        if median_vol_1h > 0 and current_vol > 0:
+            if current_vol < config.VOLUME_EXPANSION_MULTIPLIER * median_vol_1h:
+                return (False, None, None)
+
     # ---- 4h structural break ----
     bars_4h = synthesize_4h_bars(history)
     needed_4h = (
@@ -442,6 +524,10 @@ def has_breakout_structure(
         min_bars_validation=config.SWING_MIN_BARS_VALIDATION_4H,
     )
     if swing_high_4h and current_price > swing_high_4h.price:
+        if config.REQUIRE_HTF_TREND_ALIGNMENT and not htf_trend_aligned(
+            history, "long", config.HTF_TREND_LOOKBACK_HOURS,
+        ):
+            return (False, None, None)
         return (True, "long", swing_high_4h.price)
 
     swing_low_4h = find_swing_low(
@@ -451,6 +537,10 @@ def has_breakout_structure(
         min_bars_validation=config.SWING_MIN_BARS_VALIDATION_4H,
     )
     if swing_low_4h and current_price < swing_low_4h.price:
+        if config.REQUIRE_HTF_TREND_ALIGNMENT and not htf_trend_aligned(
+            history, "short", config.HTF_TREND_LOOKBACK_HOURS,
+        ):
+            return (False, None, None)
         return (True, "short", swing_low_4h.price)
 
     return (False, None, None)

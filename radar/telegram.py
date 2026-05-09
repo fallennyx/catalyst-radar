@@ -183,7 +183,15 @@ def _send_watchlist(text: str, market_label: str = "?") -> bool:
 
 
 def _format_plan(plan: Any) -> str:
-    """Render a TradePlan as a Markdown block matching the BOS alert style."""
+    """Render a TradePlan as a Markdown block matching the BOS alert style.
+
+    The plan is a multi-stage ladder, not a flat TP1/TP2 cut:
+      - Scale TP1_FRACTION at TP1, then move stop to entry (breakeven)
+      - Scale TP2_FRACTION at TP2
+      - Trail the remainder by TRAIL_ATR_MULT × ATR(14h)
+    Old single-target callers still see TP1/TP2 with %s and R-multiples; the
+    scale-out + trailing block only renders when those fields are populated.
+    """
     direction = (getattr(plan, "direction", "") or "").upper()
     entry = float(getattr(plan, "entry", 0.0) or 0.0)
     stop = float(getattr(plan, "stop", 0.0) or 0.0)
@@ -192,16 +200,41 @@ def _format_plan(plan: Any) -> str:
     risk = float(getattr(plan, "risk_per_unit", 0.0) or 0.0)
     r_tp1 = float(getattr(plan, "r_multiple_tp1", 0.0) or 0.0)
     r_tp2 = float(getattr(plan, "r_multiple_tp2", 0.0) or 0.0)
+    tp1_frac = float(getattr(plan, "tp1_fraction", 0.0) or 0.0)
+    tp2_frac = float(getattr(plan, "tp2_fraction", 0.0) or 0.0)
+    runner_frac = float(getattr(plan, "runner_fraction", 0.0) or 0.0)
+    trail_atr = getattr(plan, "trail_atr", None)
+    trail_mult = float(getattr(plan, "trail_atr_mult", 0.0) or 0.0)
+    breakeven = getattr(plan, "breakeven_trigger", None)
 
     def _pct(level: float) -> float:
         return ((level - entry) / entry * 100.0) if entry else 0.0
 
-    return (
-        f"*Plan:* {direction} @ ${_fmt_price(entry)}\n"
-        f"Stop: ${_fmt_price(stop)} ({_pct(stop):+.2f}%)   Risk: ${_fmt_price(risk)}\n"
-        f"TP1: ${_fmt_price(tp1)} ({_pct(tp1):+.2f}%, {r_tp1:.1f}R)\n"
-        f"TP2: ${_fmt_price(tp2)} ({_pct(tp2):+.2f}%, {r_tp2:.1f}R)"
-    )
+    def _f(frac: float) -> str:
+        return f"{int(round(frac * 100))}%"
+
+    tp1_label = f"TP1: ${_fmt_price(tp1)} ({_pct(tp1):+.2f}%, {r_tp1:.1f}R)"
+    tp2_label = f"TP2: ${_fmt_price(tp2)} ({_pct(tp2):+.2f}%, {r_tp2:.1f}R)"
+    if tp1_frac > 0:
+        tp1_label += f" — close {_f(tp1_frac)}"
+        if breakeven is not None:
+            tp1_label += ", move stop → entry"
+    if tp2_frac > 0:
+        tp2_label += f" — close {_f(tp2_frac)}"
+
+    lines = [
+        f"*Plan:* {direction} @ ${_fmt_price(entry)}",
+        f"Stop: ${_fmt_price(stop)} ({_pct(stop):+.2f}%)   Risk: ${_fmt_price(risk)}",
+        tp1_label,
+        tp2_label,
+    ]
+    if trail_atr and trail_mult > 0 and runner_frac > 0:
+        trail_dist = float(trail_atr) * trail_mult
+        lines.append(
+            f"Trail: remaining {_f(runner_frac)} by {trail_mult:.1f}×ATR "
+            f"(~${_fmt_price(trail_dist)} = {(trail_dist / entry * 100.0 if entry else 0.0):.2f}%)"
+        )
+    return "\n".join(lines)
 
 
 def send_bos_alert(

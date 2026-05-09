@@ -173,6 +173,141 @@ def test_has_breakout_structure_drops_when_1h_range_doesnt_expand():
     assert broke is False
 
 
+# ============================================================================
+# Volume confirmation (improvement #1)
+# ============================================================================
+
+def _vol_bar(ts: int, high: float, low: float, close: float, volume: float,
+             open_: float | None = None) -> Bar:
+    return Bar(
+        ticker="X", ts=ts,
+        open=open_ if open_ is not None else (high + low) / 2,
+        high=high, low=low, close=close,
+        volume=volume, oi=0.0, funding=0.0,
+    )
+
+
+def _hist_with_volumes(
+    in_progress_high: float,
+    in_progress_low: float,
+    in_progress_volume: float,
+    median_volume: float,
+    pivot_high: float = 100.0,
+) -> list[Bar]:
+    """200h history with consistent volume + a 4h pivot at bucket 25."""
+    bars: list[Bar] = []
+    for i in range(200):
+        if i == 101:
+            bars.append(_vol_bar(ts=i * 3600, high=pivot_high, low=pivot_high - 1.0,
+                                 close=pivot_high - 0.5, volume=median_volume))
+        else:
+            bars.append(_vol_bar(ts=i * 3600, high=92.0, low=90.0, close=91.0,
+                                 volume=median_volume))
+    bars[-1] = _vol_bar(
+        ts=199 * 3600, open_=99.0,
+        high=in_progress_high, low=in_progress_low,
+        close=in_progress_high, volume=in_progress_volume,
+    )
+    return bars
+
+
+def test_volume_gate_blocks_breakout_on_dead_volume(monkeypatch):
+    """Wide range + price above pivot but volume below the multiplier → drop."""
+    monkeypatch.setattr(config, "REQUIRE_VOLUME_CONFIRMATION", True)
+    monkeypatch.setattr(config, "VOLUME_EXPANSION_MULTIPLIER", 1.5)
+    monkeypatch.setattr(config, "REQUIRE_HTF_TREND_ALIGNMENT", False)
+    bars = _hist_with_volumes(
+        in_progress_high=103.0, in_progress_low=98.0,
+        in_progress_volume=1000.0,    # well below 1.5x median (1500)
+        median_volume=1000.0,
+    )
+    market = Market(ticker="X", asset_class="crypto_t1")
+    broke, _, _ = ranker.has_breakout_structure(market, bars, current_price=103.0)
+    assert broke is False
+
+
+def test_volume_gate_passes_when_volume_expands(monkeypatch):
+    """Same setup but volume crosses the multiplier → BOS fires."""
+    monkeypatch.setattr(config, "REQUIRE_VOLUME_CONFIRMATION", True)
+    monkeypatch.setattr(config, "VOLUME_EXPANSION_MULTIPLIER", 1.5)
+    monkeypatch.setattr(config, "REQUIRE_HTF_TREND_ALIGNMENT", False)
+    bars = _hist_with_volumes(
+        in_progress_high=103.0, in_progress_low=98.0,
+        in_progress_volume=2500.0,   # 2.5x median
+        median_volume=1000.0,
+    )
+    market = Market(ticker="X", asset_class="crypto_t1")
+    broke, direction, _ = ranker.has_breakout_structure(market, bars, current_price=103.0)
+    assert broke is True
+    assert direction == "long"
+
+
+def test_volume_gate_no_block_when_volumes_unavailable(monkeypatch):
+    """Sources that emit zero volumes (legacy CoinGecko) should not be blocked."""
+    monkeypatch.setattr(config, "REQUIRE_VOLUME_CONFIRMATION", True)
+    monkeypatch.setattr(config, "REQUIRE_HTF_TREND_ALIGNMENT", False)
+    bars = _hist_with_4h_pivot_and_breakout()  # zero volumes throughout
+    market = Market(ticker="X", asset_class="crypto_t1")
+    broke, _, _ = ranker.has_breakout_structure(market, bars, current_price=103.0)
+    assert broke is True
+
+
+# ============================================================================
+# HTF trend alignment (improvement #2)
+# ============================================================================
+
+def test_htf_trend_blocks_long_against_downtrend(monkeypatch):
+    """Long break with current price below the 7-day median close → reject."""
+    monkeypatch.setattr(config, "REQUIRE_VOLUME_CONFIRMATION", False)
+    monkeypatch.setattr(config, "REQUIRE_HTF_TREND_ALIGNMENT", True)
+    monkeypatch.setattr(config, "HTF_TREND_LOOKBACK_HOURS", 168)
+    bars: list[Bar] = []
+    # Make most of the recent 7 days close at 200, well above the breakout price (~103)
+    for i in range(200):
+        if i == 101:
+            bars.append(_vol_bar(ts=i * 3600, high=100.0, low=99.0, close=99.5, volume=0.0))
+        elif i >= 200 - 168:
+            bars.append(_vol_bar(ts=i * 3600, high=210.0, low=190.0, close=200.0, volume=0.0))
+        else:
+            bars.append(_vol_bar(ts=i * 3600, high=92.0, low=90.0, close=91.0, volume=0.0))
+    bars[-1] = _vol_bar(ts=199 * 3600, open_=99.0,
+                        high=103.0, low=98.0, close=103.0, volume=0.0)
+    market = Market(ticker="X", asset_class="crypto_t1")
+    broke, _, _ = ranker.has_breakout_structure(market, bars, current_price=103.0)
+    assert broke is False
+
+
+def test_htf_trend_passes_long_with_uptrend(monkeypatch):
+    """Long break with current price above the 7-day median close → pass."""
+    monkeypatch.setattr(config, "REQUIRE_VOLUME_CONFIRMATION", False)
+    monkeypatch.setattr(config, "REQUIRE_HTF_TREND_ALIGNMENT", True)
+    bars = _hist_with_4h_pivot_and_breakout()  # closes ~91, current ~103 → above
+    market = Market(ticker="X", asset_class="crypto_t1")
+    broke, direction, _ = ranker.has_breakout_structure(market, bars, current_price=103.0)
+    assert broke is True and direction == "long"
+
+
+# ============================================================================
+# ATR (improvement #3 helper)
+# ============================================================================
+
+def test_compute_atr_returns_none_when_history_too_short():
+    bars = [_vol_bar(ts=i * 3600, high=10.0, low=9.0, close=9.5, volume=0.0)
+            for i in range(5)]
+    assert ranker.compute_atr(bars, period=14) is None
+
+
+def test_compute_atr_basic():
+    """20 bars of width-1 ranges (high-low=1, close==prev close) → ATR ≈ 1.0."""
+    bars = []
+    for i in range(20):
+        bars.append(_vol_bar(ts=i * 3600, high=10.0, low=9.0, close=9.5, volume=0.0))
+    atr = ranker.compute_atr(bars, period=14)
+    assert atr is not None
+    # Each TR is max(1.0, |10-prev_close|, |prev_close-9|) = 1.0 in steady state
+    assert abs(atr - 1.0) < 1e-6
+
+
 def test_precompute_references_returns_4h_levels():
     """Watchlist refs come from the 4h frame now."""
     # 200-hour history with 4h-pivot high at bucket 25 (=100.0) and

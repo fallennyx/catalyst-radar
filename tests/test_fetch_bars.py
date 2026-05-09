@@ -126,39 +126,45 @@ def test_fetch_crypto_binance_uses_symbol_override(monkeypatch):
     assert kwargs["params"]["symbol"] == "1000PEPEUSDT"
 
 
-def test_fetch_crypto_binance_returns_empty_for_unmapped(monkeypatch):
-    sess = MagicMock()
+def test_fetch_crypto_binance_default_guesses_usdt_pair(monkeypatch):
+    """Tickers not in BINANCE_SYMBOLS get a `<TICKER>USDT` symbol guess."""
+    sess = _mock_session(_binance_klines(2))
     monkeypatch.setattr(fetch_bars, "_session", lambda: sess)
-    rows = fetch_bars.fetch_crypto_binance("HYPE", days=1)  # HYPE isn't on Binance
-    assert rows == []
-    sess.get.assert_not_called()
+    fetch_bars.fetch_crypto_binance("HYPE", days=1)
+    _, kwargs = sess.get.call_args
+    assert kwargs["params"]["symbol"] == "HYPEUSDT"
 
 
-def test_fetch_crypto_router_prefers_binance(monkeypatch):
-    """fetch_crypto should use Binance when symbol exists; fall back otherwise."""
-    binance_calls, coingecko_calls = [], []
+def test_fetch_crypto_router_prefers_coinbase(monkeypatch):
+    """Router order: Coinbase → Bybit → Binance → CoinGecko. First win short-circuits."""
+    calls = {"cb": [], "by": [], "bi": [], "cg": []}
+    monkeypatch.setattr(fetch_bars, "fetch_crypto_coinbase",
+                        lambda t, d, end_ts=None: calls["cb"].append(t) or [{"ticker": t}])
+    monkeypatch.setattr(fetch_bars, "fetch_crypto_bybit",
+                        lambda t, d, end_ts=None: calls["by"].append(t) or [{"ticker": t}])
     monkeypatch.setattr(fetch_bars, "fetch_crypto_binance",
-                        lambda t, d, end_ts=None: binance_calls.append(t) or [{"ticker": t}])
+                        lambda t, d, end_ts=None: calls["bi"].append(t) or [{"ticker": t}])
     monkeypatch.setattr(fetch_bars, "fetch_crypto_hourly",
-                        lambda t, d, end_ts=None: coingecko_calls.append(t) or [{"ticker": t}])
+                        lambda t, d, end_ts=None: calls["cg"].append(t) or [{"ticker": t}])
 
     fetch_bars.fetch_crypto("BTC", days=1)
-    assert binance_calls == ["BTC"]
-    assert coingecko_calls == []
+    assert calls == {"cb": ["BTC"], "by": [], "bi": [], "cg": []}
 
 
-def test_fetch_crypto_router_falls_back_to_coingecko(monkeypatch):
-    """When Binance returns nothing (or ticker isn't on Binance), use CoinGecko."""
-    binance_calls, coingecko_calls = [], []
+def test_fetch_crypto_router_falls_back_through_chain(monkeypatch):
+    """Empty-result sources are skipped in order until something returns rows."""
+    calls = {"cb": [], "by": [], "bi": [], "cg": []}
+    monkeypatch.setattr(fetch_bars, "fetch_crypto_coinbase",
+                        lambda t, d, end_ts=None: calls["cb"].append(t) or [])
+    monkeypatch.setattr(fetch_bars, "fetch_crypto_bybit",
+                        lambda t, d, end_ts=None: calls["by"].append(t) or [])
     monkeypatch.setattr(fetch_bars, "fetch_crypto_binance",
-                        lambda t, d, end_ts=None: binance_calls.append(t) or [])
+                        lambda t, d, end_ts=None: calls["bi"].append(t) or [])
     monkeypatch.setattr(fetch_bars, "fetch_crypto_hourly",
-                        lambda t, d, end_ts=None: coingecko_calls.append(t) or [{"ticker": t}])
+                        lambda t, d, end_ts=None: calls["cg"].append(t) or [{"ticker": t}])
 
-    # HYPE isn't in BINANCE_SYMBOLS → router skips Binance entirely
     fetch_bars.fetch_crypto("HYPE", days=1)
-    assert binance_calls == []
-    assert coingecko_calls == ["HYPE"]
+    assert calls == {"cb": ["HYPE"], "by": ["HYPE"], "bi": ["HYPE"], "cg": ["HYPE"]}
 
 
 # ---------- yfinance ----------
