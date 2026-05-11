@@ -12,9 +12,15 @@ ranks unusual movers with a composite vol-normalized score, fetches news
 catalysts, classifies them with Claude Haiku, applies a five-rule suppression
 chain (BOS structural break is Rule 0), and pushes survivors to Telegram.
 
-Architecture is **two cooperating asyncio loops in one process**:
+Architecture is **three cooperating asyncio loops in one process**:
 - **Tier 1** (every 5 min): universe → ranker → catalysts → classifier → suppression → emit OR watchlist OR drop
 - **Tier 2** (every 60 s): poll watchlist tickers for live mark-price crosses against stored swing references; promote to EMIT on confirmed cross + range expansion
+- **Tier 3** (every 1 h): push heartbeat + active watchlist summary + recent top-mover candidates to Telegram. Doubles as engine-alive signal.
+
+**Boot sequence:** `main_async` calls `storage.init_db()`, then runs a one-shot
+gap-aware backfill that fills `bars_1h` from external sources (Binance /
+Coinbase / Bybit / CoinGecko / yfinance) so the BOS check can fire on cycle 1
+instead of waiting ~5.5 days. Restart on a populated DB is a ~5-second no-op.
 
 Single Python process, single asyncio loop. **No threading. No multiprocessing.
 No microservices. No web dashboard. No ML training. No backtesting framework
@@ -27,10 +33,13 @@ beyond `radar/replay.py`.**
 ```
 radar/
   main.py          asyncio orchestrator: tier1_discovery_scan + tier2_trigger_watch
+                   + tier3_hourly_report, plus _backfill_bars_for_universe and
+                   _maybe_prune (wired into the Tier 1 loop)
   config.py        ALL tunables. Edit here to change behavior.
-  lighter.py       live Lighter universe (161 perps via mainnet API) + classify()
+  lighter.py       live Lighter universe (~163 perps via mainnet API) + classify()
   universe.py      Market dataclass; sources from lighter.fetch_universe()
-  storage.py       SQLite + Bar dataclass + 6 watchlist helpers + swappable _now()
+  storage.py       SQLite + Bar dataclass + watchlist helpers + swappable _now();
+                   includes last_bar_ts, prune_old_bars, prune_old_alerts
   ranker.py        composite score + 1h/4h swing detection + has_breakout_structure
   trade_plan.py    deterministic SL/TP ladder attached to every BOS alert
   catalysts.py     asset-routed news (RSS / EDGAR / yfinance / GDELT)
@@ -39,12 +48,15 @@ radar/
   suppression.py   5-rule chain (BOS-aware), Alert dataclass
   telegram.py      send_bos_alert (with Plan: block) + send_watchlist_notification
   replay.py        virtual-clock historical playback
-  fetch_bars.py    Binance (preferred) → CoinGecko fallback → yfinance for equities
+  fetch_bars.py    Coinbase → Bybit → Binance → CoinGecko fallback chain for crypto;
+                   yfinance for equity / commodity / forex (=X / =F overrides);
+                   ROUTES dict + TICKER_ROUTE_OVERRIDES + is_fetchable() helper
   fetch_news.py    GDELT historical news
   timefmt.py       CDT/CST formatting (America/Chicago) — user-facing only
-tests/             ~120 passing; mock all external services
+tests/             175 passing; mock all external services
 data/              SQLite + sample data (bars.csv / news_archive.json gitignored)
 BOS_FILTER_NOTES.md  rationale + tuning guide for the BOS filter
+deploy-quickref.md   end-to-end deploy walkthrough (ssh + docker compose)
 ```
 
 ---
@@ -95,6 +107,59 @@ and Rule 0 routes to WATCHLIST (if score is high enough) or DROP.
 
 ---
 
+## Startup backfill, auto-prune, hourly report (May 2026)
+
+Three operational features wired into `main.py`. All toggleable via `config.py`
+(`BACKFILL_ENABLED`, `HOURLY_REPORT_ENABLED`). Prune has no off-switch — it
+runs from the Tier 1 loop unconditionally.
+
+### Startup backfill — `_backfill_bars_for_universe`
+
+Before Tier 1/2/3 start, the engine walks the live Lighter universe and fills
+the missing tail of `bars_1h` for each ticker. Gap-aware: if the last bar is
+less than `BACKFILL_GAP_THRESHOLD_SEC` (1 h) old it skips; otherwise it pulls
+just the missing hours (capped at `BOS_BAR_HISTORY_HOURS = 240`).
+
+- **Routing:** `fetch_bars.ROUTES[asset_class]` picks the fetcher.
+  `TICKER_ROUTE_OVERRIDES` lets specific tickers override their class — e.g.
+  PAXG is commodity-classed but the override sends it through `fetch_crypto`.
+- **Idempotent:** `storage.insert_bar` uses `INSERT OR REPLACE`. Re-runs on a
+  populated DB log mostly `fresh — skipping` and return in ~5 seconds.
+- **Cancellable:** checks `_RUNNING` between tickers; honors SIGTERM. Each
+  fetch is wrapped in `asyncio.wait_for(timeout=BACKFILL_PER_TICKER_TIMEOUT_SEC)`.
+- **Per-ticker isolation:** one bad fetcher can't sink the batch.
+- **`is_fetchable(ticker, asset_class)`** returns True if we have *a route to
+  try*, not "we know it works." Crypto always returns True because the
+  fallback chain handles unmapped tickers via `<TICKER>USDT` defaults; failed
+  fetches just log and skip.
+
+Full backfill on a 163-ticker fresh DB: roughly 5–10 minutes.
+
+### Auto-prune — `_maybe_prune`
+
+Called at the end of every Tier 1 cycle. Runs at most once per
+`PRUNE_INTERVAL_SEC` (24 h). First invocation always fires (`_LAST_PRUNE_TS=0.0`)
+so a stale DB from a prior deployment gets cleaned up immediately.
+
+- `storage.prune_old_bars(ROLLING_WINDOW_DAYS=30)` — DELETE bars older than 30 days
+- `storage.prune_old_alerts(PRUNE_ALERTS_DAYS=30)` — same for alerts
+
+DB stabilizes at ~500 MB after the first 30 days at 163 tickers.
+
+### Hourly report — `tier3_hourly_report`
+
+Async loop that posts to `TELEGRAM_CHAT_ID` every `HOURLY_REPORT_INTERVAL_SEC`.
+Body comes from `_format_hourly_report()`:
+
+- Heartbeat: `RADAR HOURLY · last scan N.Nm ago`
+- Universe size + active watchlist count
+- Up to `HOURLY_REPORT_MAX_WATCHLIST_LINES` watchlist entries (ticker, direction, swing level, hours on list)
+- Up to `HOURLY_REPORT_MAX_TOP_CANDIDATES` "Recent top movers (no BOS yet)" from `_LAST_TOP_CANDIDATES`, captured at the end of each Tier 1 cycle
+
+If the message stops arriving, the engine is down.
+
+---
+
 ## Sharp edges — read before touching code
 
 These have all bitten this project. Don't repeat them.
@@ -111,18 +176,31 @@ These have all bitten this project. Don't repeat them.
 10. **Telegram lib v21 is async-only.** `telegram.py:_send_sync` runs the coroutine on a private event loop so the rest of the codebase can stay sync. Never block the main asyncio loop with `_send_sync`; if called from Tier 1/2 cycles it works because each cycle is `await asyncio.sleep`-bounded.
 11. **`BOS_BAR_HISTORY_HOURS = 240` (10 days) is the minimum history fetch for BOS evaluation.** The 4h frame needs ≥ 33 4h-bars (132 1h hours) to fire; main.py and replay.py both pull this much. Don't downsize without checking that 4h synthesis still has enough bars.
 12. **No new dependencies.** `pyproject.toml` is pinned. If you genuinely need one, ask first.
+13. **`main.py` module state powers the hourly report.** `_LAST_SCAN_TS` and `_LAST_TOP_CANDIDATES` are set at the end of `run_discovery_cycle`. `_LAST_PRUNE_TS` is set by `_maybe_prune`. If you refactor Tier 1, keep those writes — Tier 3 reads them through `_format_hourly_report()`.
+14. **`fetch_bars` row schema uses ISO `ts`, storage uses unix int.** Backfill goes through `_parse_iso_to_unix` (`%Y-%m-%dT%H:%M:%SZ` ← → unix). Don't change `_iso()` in fetch_bars without updating that parser.
+15. **`fetch_bars.is_fetchable` returns True for any crypto class** — it means "we have a route to try," not "we know it works." The fallback chain (`fetch_crypto`: Coinbase → Bybit → Binance → CoinGecko) handles unmapped tickers via `<TICKER>USDT` defaults. Failed fetches just log a warning and skip; the cost is bounded by `BACKFILL_PER_TICKER_TIMEOUT_SEC = 30`.
+16. **`TICKER_ROUTE_OVERRIDES` lives in `fetch_bars.py`.** Both `is_fetchable` and `_backfill_bars_for_universe` honor it. Use this when a ticker's Lighter `asset_class` doesn't reflect where it actually trades (e.g. PAXG is "commodity" but only trades on Binance/CoinGecko).
+17. **Prune is wired now.** `storage.prune_old_bars` and `storage.prune_old_alerts` are called from `_maybe_prune` in the Tier 1 loop, gated to once per `PRUNE_INTERVAL_SEC = 86400`. If you see "DB growing forever" in older docs, those are stale.
+18. **Telegram failures NEVER raise out of the hourly-report send.** `_send_hourly_report` wraps `telegram._send_main` in try/except. Don't bubble exceptions out of Tier 3.
 
 ---
 
 ## Data sourcing — rate limits and quirks
 
+Crypto bars use a US-friendly fallback chain in `fetch_crypto`:
+**Coinbase Exchange → Bybit v5 → Binance klines → CoinGecko**. Returns on
+the first non-empty result. Real OHLC from the first three; CoinGecko
+synthesizes from 5-min ticks.
+
 | Source | Rate limit | Used for | Notes |
 |---|---|---|---|
-| **Binance klines** | 6000 wt/min | crypto bars (preferred) | 1h interval, max 1000 candles/call. PEPE/BONK use `1000PEPE`/`1000BONK` price-scaled symbols. |
-| **CoinGecko `/market_chart/range`** | ~5 call/s aggressive | crypto bars (fallback) | Returns **1 tick/hour for >1-day windows** — `fetch_crypto_hourly` synthesizes OHLC from previous-bar close. Range-expansion tests will be conservative. |
+| **Coinbase Exchange** | ~10 req/s public | crypto bars (1st choice) | Max 300 candles/call; product IDs like `BTC-USD`. US-accessible. |
+| **Bybit v5** | ~20 req/s public | crypto bars (2nd choice) | Max 1000 candles/call. Good fallback for tokens missing on Coinbase. |
+| **Binance klines** | 6000 wt/min | crypto bars (3rd choice) | 1h interval, max 1000 candles/call. PEPE/BONK use `1000PEPE`/`1000BONK` price-scaled symbols. Geo-blocked from some US regions. |
+| **CoinGecko `/market_chart/range`** | ~5 call/s aggressive | crypto bars (final fallback) | Returns **1 tick/hour for >1-day windows** — `fetch_crypto_hourly` synthesizes OHLC from previous-bar close. Range-expansion tests will be conservative. Requires explicit `COINGECKO_IDS` mapping. |
 | **GDELT doc API** | 1 query / 5 s hard | historical news | Bare `OR` requires `(...)` wrap. Rate limiter is sticky after 429s — wait ≥ 20 s before retry. |
-| **yfinance** | gentle | equity / commodity / forex | Intraday capped at ~30-60 days. Forex pairs need `=X` suffix (e.g. `EURUSD=X`); commodities use `=F` (`GC=F` for gold). |
-| **Lighter mainnet API** | unrestricted (so far) | universe | `https://mainnet.zklighter.elliot.ai/api/v1/orderBooks` returns 161 active perps. Cached 60 s in `radar.lighter`. |
+| **yfinance** | gentle | equity / commodity / forex | Intraday capped at ~30-60 days. Forex pairs need `=X` suffix (e.g. `EURUSD=X`); commodities use `=F` (`GC=F` for gold). All 8 Lighter forex pairs are auto-mapped in `YFINANCE_SYMBOLS`. |
+| **Lighter mainnet API** | unrestricted (so far) | universe | `https://mainnet.zklighter.elliot.ai/api/v1/orderBooks` returns ~163 active perps as of May 2026. Cached 60 s in `radar.lighter`. |
 | **Anthropic Haiku** | account-tier | classifier | tool_choice forces structured output. Substring validator drops responses with fabricated quotes. |
 
 ---
@@ -142,12 +220,24 @@ These have all bitten this project. Don't repeat them.
 
 ```bash
 # tests
-pytest tests/                          # all 93+ should pass
+pytest tests/                          # all 175 should pass
 pytest tests/test_suppression.py -x    # one file, stop on first failure
 
 # fetch fresh data
 python -m radar.fetch_bars --tickers BTC,ETH,SOL,DOGE,ARB,OP,WIF,PEPE,BONK --days 30
 python -m radar.fetch_news --tickers BTC,ETH --start 2026-04-15 --end 2026-05-06 --sleep 6
+
+# coverage audit — which Lighter tickers do we have a backfill route for?
+python -c "
+from collections import defaultdict
+from radar import lighter, fetch_bars
+m = lighter.fetch_universe()
+ok, miss = defaultdict(list), defaultdict(list)
+for x in m:
+    (ok if fetch_bars.is_fetchable(x.symbol, x.asset_class) else miss)[x.asset_class].append(x.symbol)
+print(f'fetchable: {sum(len(v) for v in ok.values())}/{len(m)}')
+for c, syms in sorted(miss.items()): print(c, sorted(syms))
+"
 
 # historical replay (no API costs with --no-classify)
 python -m radar.replay --bars data/bars.csv --news data/news_archive.json --no-classify
@@ -155,7 +245,10 @@ python -m radar.replay --bars data/bars.csv --news data/news_archive.json --no-c
 # end-to-end run (needs ANTHROPIC_API_KEY + TELEGRAM_BOT_TOKEN + TELEGRAM_CHAT_ID in .env)
 python -m radar.main
 
-# deploy (rsyncs to RADAR_HOST and rebuilds the container)
+# Telegram smoke test (no python-telegram-bot install needed — uses HTTP API directly)
+python scripts/telegram_smoketest.py
+
+# deploy — full walkthrough in deploy-quickref.md
 RADAR_HOST=user@host ./deploy.sh
 ```
 
@@ -185,6 +278,26 @@ For new features:
 
 - **Branch:** `master` (working tree dirty — user commits manually; never auto-commit, branch, or push).
 - **Recently landed (May 2026):**
+  - **Startup gap-aware backfill** (`main._backfill_bars_for_universe`) — fills
+    `bars_1h` from external sources before Tier 1/2/3 start so BOS can fire on
+    the first cycle. Cancellable, idempotent, per-ticker isolated. Restarts
+    on a populated DB skip in ~5 seconds.
+  - **Auto-prune wired** — `storage.prune_old_bars` + new `prune_old_alerts`
+    run from `_maybe_prune` at the end of each Tier 1 cycle, gated to once
+    per `PRUNE_INTERVAL_SEC` (24 h). DB stabilizes at ~500 MB.
+  - **Tier 3 hourly Telegram report** (`tier3_hourly_report`) — heartbeat +
+    active watchlist + recent top movers. Doubles as engine-alive signal.
+  - **`fetch_bars` coverage expansion** — added Coinbase + Bybit fallback
+    fetchers ahead of Binance (US-friendly chain). Added forex route (`=X`
+    via yfinance), 4 commodity overrides (NATGAS/XPT/XPD/XCU → `=F` futures),
+    10 crypto_t1 names + PAXG to BINANCE_SYMBOLS, XMR to COINGECKO_IDS, and
+    explicit `1000PEPE/1000BONK/1000FLOKI/1000SHIB/1000TOSHI` mappings.
+    `is_fetchable` now returns True for any crypto class (fallback chain
+    handles unmapped tickers). 100% of the ~163 Lighter universe has a
+    backfill route to attempt.
+  - **`TICKER_ROUTE_OVERRIDES`** in `fetch_bars.py` — lets specific tickers
+    override their class-based route (e.g. PAXG → `crypto_t1` route so it
+    goes through Binance, not yfinance commodity futures).
   - **Trade plan** (`radar/trade_plan.py`) — every BOS EMIT carries a deterministic
     SL/TP ladder. Plan block is rendered in the Telegram payload via
     `telegram._format_plan`. TP2 = `min(next_prior_swing, entry + 3R)` for longs,
@@ -198,15 +311,13 @@ For new features:
   - **`BOS_BAR_HISTORY_HOURS = 240`** — main.py and replay.py both pull this
     much history before invoking `has_breakout_structure` (4h synthesis needs
     ≥ 33 4h-bars).
-- **In flight (older, unfinished):** wiring `fetch_bars` and `replay.load_bars`
-  to use the live Lighter universe + auto-classification (`lighter.classify`).
-  Lighter module exists; consumers still use the legacy `config.SYMBOL_TO_CLASS`
-  map. Resume by adding `lighter.classify(ticker)` to fetch_bars's CSV row
-  construction and replacing `config.SYMBOL_TO_CLASS.values()` validation in
-  `replay.load_bars` with `config.VALID_ASSET_CLASSES`.
-- **Forex/ETF routing in `fetch_bars`** still not implemented — `EURUSD`,
-  `SPY`, `QQQ` from Lighter fall through `fetch_yfinance_hourly` which doesn't
-  handle the `=X` forex suffix.
+- **In flight (older, unfinished):** wiring `fetch_bars` CLI and
+  `replay.load_bars` to use the live Lighter universe + auto-classification
+  (`lighter.classify`). The CLI still uses `config.SYMBOL_TO_CLASS`; the
+  startup backfill (the runtime path) uses the live universe directly.
+  Resume by adding `lighter.classify(ticker)` to `fetch_bars.fetch_universe`'s
+  CSV row construction and replacing `config.SYMBOL_TO_CLASS.values()`
+  validation in `replay.load_bars` with `config.VALID_ASSET_CLASSES`.
 - **MTF Phase 2 deferred (15-min trigger frame):** would solve the
   "alert at 03:15 not 04:00" intra-bar latency. Needs Binance access (currently
   geo-blocked) or paid CoinGecko tier. Hold off until live trading confirms
