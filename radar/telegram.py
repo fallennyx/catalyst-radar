@@ -267,15 +267,35 @@ def send_bos_alert(
         or "(no catalyst description)"
     )
     catalyst_type = getattr(classifier_result, "catalyst_type", "?")
-    conviction = float(getattr(classifier_result, "conviction", None)
-                       or getattr(classifier_result, "confidence", 0.0) or 0.0)
-    horizon = getattr(classifier_result, "horizon", "unknown")
-    thesis = (
-        getattr(classifier_result, "continuation_thesis", None)
-        or getattr(classifier_result, "summary", None)
-        or ""
-    )
-    kill = getattr(classifier_result, "kill_signal", "") or "—"
+
+    # Stage 2 predictor takes precedence on prose fields when available. It
+    # has full context (price history, indicators, BTC, news, classifier output)
+    # while the classifier only sees news. If stage 2 returned None
+    # (infrastructure failure / disabled / no key), fall back cleanly to the
+    # classifier's defaults.
+    pred = metadata.get("predictor_result") if isinstance(metadata, dict) else None
+
+    if pred is not None:
+        conviction = float(getattr(pred, "direction_confidence", 0.0) or 0.0)
+        horizon = getattr(pred, "expected_horizon", "intraday")
+        thesis = getattr(pred, "thesis", "") or ""
+        kill = getattr(pred, "kill_signal", "") or "—"
+        entry_guidance = getattr(pred, "entry_guidance", "") or ""
+        setup_quality = float(getattr(pred, "setup_quality", 0.0) or 0.0)
+        risks = list(getattr(pred, "risks", []) or [])
+    else:
+        conviction = float(getattr(classifier_result, "conviction", None)
+                           or getattr(classifier_result, "confidence", 0.0) or 0.0)
+        horizon = getattr(classifier_result, "horizon", "unknown")
+        thesis = (
+            getattr(classifier_result, "continuation_thesis", None)
+            or getattr(classifier_result, "summary", None)
+            or ""
+        )
+        kill = getattr(classifier_result, "kill_signal", "") or "—"
+        entry_guidance = ""
+        setup_quality = 0.0
+        risks = []
 
     ticker = _md_escape(getattr(market, "ticker", "?"))
     asset_class = _md_escape(getattr(market, "asset_class", "?"))
@@ -286,15 +306,26 @@ def send_bos_alert(
 
     plan_block = f"\n\n{_format_plan(plan)}" if plan is not None else ""
 
+    # Stage 2 enrichment lines — appear only when predictor populated them.
+    entry_line = (
+        f"\n*Entry:* {_md_escape(entry_guidance)}" if entry_guidance else ""
+    )
+    quality_line = (
+        f" · *Setup:* {setup_quality*100:.0f}/100" if pred is not None else ""
+    )
+    risks_block = ""
+    if risks:
+        risks_block = "\n\n*Risks:*\n" + "\n".join(f"• {_md_escape(r)}" for r in risks[:3])
+
     body = (
         f"{direction_emoji} *RADAR — {ticker}* {pct_24h:+.2f}%{promoted_tag}\n"
         f"{asset_class}{_session_tag(market)}\n\n"
         f"*BOS confirmed:* {direction.upper()} above ${_fmt_price(breakout_level)}\n"
         f"*Catalyst:* {_md_escape(primary)}\n"
-        f"*Type:* {_md_escape(catalyst_type)} · *Conviction:* {conviction*100:.0f}/100\n"
-        f"*Horizon:* {_md_escape(horizon)}\n\n"
+        f"*Type:* {_md_escape(catalyst_type)} · *Conviction:* {conviction*100:.0f}/100{quality_line}\n"
+        f"*Horizon:* {_md_escape(horizon)}{entry_line}\n\n"
         f"{_md_escape(thesis)}\n\n"
-        f"*Kill:* {_md_escape(kill)}{plan_block}\n\n"
+        f"*Kill:* {_md_escape(kill)}{plan_block}{risks_block}\n\n"
         f"Vol ${vol/1e6:.1f}M | OI ${oi/1e6:.1f}M | Funding {funding*100:.4f}%\n"
         f"[Open in Lighter](https://app.lighter.xyz/trade/{ticker})"
     )

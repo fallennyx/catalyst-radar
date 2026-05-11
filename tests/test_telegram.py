@@ -31,7 +31,7 @@ def _market(ticker: str = "AMD", asset_class: str = "equity",
     )
 
 
-def _classifier(direction: str = "long") -> ClassifierResult:
+def _classifier(direction: str = "long", horizon: str = "days") -> ClassifierResult:
     return ClassifierResult(
         catalyst_type="earnings",
         direction=direction,
@@ -41,7 +41,7 @@ def _classifier(direction: str = "long") -> ClassifierResult:
         is_actionable=True,
         primary_catalyst="Strong earnings beat",
         conviction=0.8,
-        horizon="days",
+        horizon=horizon,
         continuation_thesis="Trend continuation expected",
         kill_signal="Loss of breakout level",
     )
@@ -141,3 +141,67 @@ def test_alert_payload_omits_plan_block_when_none():
     # The rest of the alert still landed
     assert "BOS confirmed" in body
     assert "AMD" in body
+
+
+# ============================================================================
+# Stage 2 enrichment — predictor_result in metadata supersedes classifier
+# ============================================================================
+
+def test_alert_renders_stage2_thesis_and_risks_when_present():
+    """When metadata carries predictor_result, the Telegram body uses its
+    thesis, kill signal, horizon, entry guidance, and risks instead of the
+    classifier's defaults."""
+    from radar.predictor import PredictorResult
+
+    market = _market(price=110.0)
+    cls = _classifier(direction="long")
+    pred = PredictorResult(
+        verdict="ALERT_NOW",
+        direction_confidence=0.85,
+        setup_quality=0.78,
+        thesis="Clean 4h breakout with confirming ETF flow news — bullish continuation likely.",
+        kill_signal="Below $99.80 — that's where the breakout fails.",
+        expected_horizon="1-3_days",
+        expected_r_multiple=3.0,
+        entry_guidance="Pullback to $110.00",
+        risks=["BTC reversal", "Fed speak on Wednesday", "Volume could fade"],
+    )
+    metadata = {"breakout_level": 100.0, "predictor_result": pred}
+
+    sent, p = _capture_body()
+    with p:
+        telegram.send_bos_alert(market, cls, metadata, plan=None)
+    body = sent[0]
+
+    # Stage 2 thesis and kill rendered
+    assert "Clean 4h breakout" in body
+    assert "Below $99.80" in body
+    # Stage 2 horizon used, not classifier's "unknown" (underscore is md-escaped)
+    assert "1-3" in body and "days" in body
+    # Entry guidance line
+    assert "Pullback to $110.00" in body
+    # Setup quality line
+    assert "Setup:" in body
+    assert "78/100" in body
+    # Risks rendered as a bulleted block
+    assert "Risks:" in body
+    assert "BTC reversal" in body
+    assert "Fed speak on Wednesday" in body
+
+
+def test_alert_falls_back_to_classifier_when_no_predictor():
+    market = _market(price=110.0)
+    cls = _classifier(direction="long", horizon="swing")
+    metadata = {"breakout_level": 100.0}  # no predictor_result
+
+    sent, p = _capture_body()
+    with p:
+        telegram.send_bos_alert(market, cls, metadata, plan=None)
+    body = sent[0]
+
+    # Classifier's horizon shown
+    assert "swing" in body
+    # No stage-2-specific labels
+    assert "Setup:" not in body
+    assert "Risks:" not in body
+    assert "Entry:" not in body
