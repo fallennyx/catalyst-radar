@@ -278,6 +278,27 @@ def prune_old_bars(days: int = config.ROLLING_WINDOW_DAYS, db_path: str | None =
         return cur.rowcount
 
 
+def last_bar_ts(ticker: str, db_path: str | None = None) -> int | None:
+    """Most recent bar timestamp for ticker, or None if no bars stored.
+
+    Used by the startup backfill to decide whether to fetch the full 240h
+    history or just the missing tail.
+    """
+    with _conn(db_path) as cx:
+        row = cx.execute(
+            "SELECT MAX(ts) FROM bars_1h WHERE ticker = ?", (ticker,)
+        ).fetchone()
+    return int(row[0]) if row and row[0] is not None else None
+
+
+def prune_old_alerts(days: int = 30, db_path: str | None = None) -> int:
+    """Delete alerts older than ``days``. Returns rowcount."""
+    cutoff = _now() - days * 86400
+    with _conn(db_path) as cx:
+        cur = cx.execute("DELETE FROM alerts WHERE created_at < ?", (cutoff,))
+        return cur.rowcount
+
+
 # ---------- news_items ----------
 
 def upsert_news_item(

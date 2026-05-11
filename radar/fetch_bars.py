@@ -69,6 +69,10 @@ COINGECKO_IDS: dict[str, str] = {
     "PEPE": "pepe",
     "BONK": "bonk",
     "MOG": "mog-coin",
+    # commodity-pegged
+    "PAXG": "pax-gold",
+    # delisted from major US exchanges, only CoinGecko has the long tail
+    "XMR": "monero",
     # USELESS, FARTCOIN intentionally skipped — no stable mapping
 }
 
@@ -77,9 +81,22 @@ YFINANCE_SYMBOLS: dict[str, str] = {
     "HYUNDAI": "HYMTF",      # OTC ADR
     "XAU": "GC=F",           # gold front-month future
     "XAG": "SI=F",           # silver front-month future
+    "XPT": "PL=F",           # platinum front-month future
+    "XPD": "PA=F",           # palladium front-month future
+    "XCU": "HG=F",           # copper front-month future
+    "NATGAS": "NG=F",        # natural gas front-month future
     "BRENTOIL": "BZ=F",      # Brent crude front-month
     "WTI": "CL=F",           # WTI front-month
 }
+
+# Forex routes through yfinance with the "=X" suffix. Injected into
+# YFINANCE_SYMBOLS at import time so the existing fetcher needs no changes.
+_FOREX_PAIRS = (
+    "AUDUSD", "EURUSD", "GBPUSD", "NZDUSD",
+    "USDCAD", "USDCHF", "USDJPY", "USDKRW",
+)
+for _p in _FOREX_PAIRS:
+    YFINANCE_SYMBOLS.setdefault(_p, f"{_p}=X")
 
 # Binance USDT-perp/spot symbols. Most cryptos map directly (BTC → BTCUSDT);
 # memes are price-scaled by Binance to keep notional values reasonable —
@@ -90,17 +107,41 @@ BINANCE_SYMBOLS: dict[str, str] = {
     # crypto_t1
     "BTC": "BTCUSDT", "ETH": "ETHUSDT", "SOL": "SOLUSDT",
     "BNB": "BNBUSDT", "XRP": "XRPUSDT", "DOGE": "DOGEUSDT",
+    "ADA": "ADAUSDT", "AVAX": "AVAXUSDT", "BCH": "BCHUSDT",
+    "DOT": "DOTUSDT", "HBAR": "HBARUSDT", "LINK": "LINKUSDT",
+    "LTC": "LTCUSDT", "TRX": "TRXUSDT", "XLM": "XLMUSDT",
     # crypto_t2
     "ONDO": "ONDOUSDT", "PENDLE": "PENDLEUSDT", "TON": "TONUSDT",
     "LDO": "LDOUSDT", "ARB": "ARBUSDT", "OP": "OPUSDT",
     "INJ": "INJUSDT", "AAVE": "AAVEUSDT", "FIL": "FILUSDT",
     "RNDR": "RENDERUSDT", "FET": "FETUSDT",
     "NEAR": "NEARUSDT", "APT": "APTUSDT", "SUI": "SUIUSDT", "TIA": "TIAUSDT",
-    # crypto_meme — Binance price-scales these
+    # crypto_meme — Binance price-scales these (and Lighter uses the 1000-prefix tickers)
     "WIF": "WIFUSDT",
     "PEPE": "1000PEPEUSDT",
     "BONK": "1000BONKUSDT",
-    # HYPE not on Binance (Hyperliquid native); USELESS, FARTCOIN, MOG fall back to CoinGecko
+    "1000PEPE": "1000PEPEUSDT",
+    "1000BONK": "1000BONKUSDT",
+    "1000FLOKI": "1000FLOKIUSDT",
+    "1000SHIB": "1000SHIBUSDT",
+    "1000TOSHI": "1000TOSHIUSDT",
+    # commodity-pegged crypto
+    "PAXG": "PAXGUSDT",
+    # HYPE not on Binance (Hyperliquid native); USELESS, FARTCOIN, MOG fall back to CoinGecko;
+    # XMR is delisted from Binance — see COINGECKO_IDS.
+}
+
+
+# Per-ticker route overrides for assets whose Lighter asset_class doesn't
+# reflect where they actually trade. Used by ``is_fetchable`` and by the
+# startup backfill loop so the right fetcher is picked.
+#
+# Example: PAXG is classified as ``commodity`` (gold-pegged token) but only
+# trades on crypto venues (Binance / CoinGecko), not on yfinance commodity
+# futures. Routing it through ``fetch_crypto`` instead of ``fetch_yfinance_hourly``
+# is what makes the backfill work.
+TICKER_ROUTE_OVERRIDES: dict[str, str] = {
+    "PAXG": "crypto_t1",
 }
 
 
@@ -660,7 +701,38 @@ ROUTES = {
     "crypto_meme": fetch_crypto,
     "equity": fetch_yfinance_hourly,
     "commodity": fetch_yfinance_hourly,
+    "forex": fetch_yfinance_hourly,
 }
+
+
+def is_fetchable(ticker: str, asset_class: str) -> bool:
+    """Whether we have a working backfill route for this (ticker, asset_class).
+
+    Used by the startup backfill in main.py to bucket the Lighter universe
+    into "fetch now" vs "let it cold-start the slow way" and log the latter
+    once so we know which exotic symbols are uncovered.
+
+    Crypto: always True. ``fetch_crypto`` has a Coinbase → Bybit → Binance →
+    CoinGecko fallback chain plus a ``{TICKER}USDT`` symbol default, so any
+    coin listed on one of those exchanges will backfill. Truly long-tail
+    tokens just produce empty fetches that the per-ticker error handler logs
+    and moves past — cost is bounded by ``BACKFILL_PER_TICKER_TIMEOUT_SEC``.
+
+    Equity: True. yfinance accepts raw symbols.
+    Commodity / Forex: must have a YFINANCE_SYMBOLS override.
+    Anything in TICKER_ROUTE_OVERRIDES is fetchable via the overridden route.
+    """
+    t = ticker.upper().strip()
+    if t in TICKER_ROUTE_OVERRIDES:
+        return True
+    cls = asset_class.lower().strip()
+    if cls.startswith("crypto"):
+        return True
+    if cls == "equity":
+        return True
+    if cls in ("commodity", "forex"):
+        return t in YFINANCE_SYMBOLS
+    return False
 
 
 def fetch_universe(

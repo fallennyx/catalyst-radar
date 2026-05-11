@@ -107,6 +107,28 @@ GDELT_BASE = "https://api.gdeltproject.org/api/v2/doc/doc"
 DB_PATH = "data/radar.db"
 ROLLING_WINDOW_DAYS = 30
 
+# ============ STARTUP BACKFILL ============
+# On engine start, fetch the missing 1h-bar history per ticker so the BOS
+# engine doesn't sit blind for ~5.5 days. Idempotent (INSERT OR REPLACE),
+# cancellable on SIGTERM, isolated per-ticker on failure.
+BACKFILL_ENABLED = True
+BACKFILL_SLEEP_BETWEEN_SEC = 0.6        # pacer between per-ticker fetches
+BACKFILL_PER_TICKER_TIMEOUT_SEC = 30    # hard cap per fetch; we move on after
+BACKFILL_GAP_THRESHOLD_SEC = 3600       # skip ticker if last bar < this old
+
+# ============ AUTO-PRUNE ============
+# Wired into the Tier 1 loop. At most one prune per PRUNE_INTERVAL_SEC.
+PRUNE_INTERVAL_SEC = 86400              # once per day
+PRUNE_ALERTS_DAYS = 30                  # alerts older than this get deleted
+
+# ============ HOURLY REPORT ============
+# Heartbeat + watchlist summary pushed to Telegram every hour. Doubles as
+# the "engine alive" signal — silence means trouble.
+HOURLY_REPORT_ENABLED = True
+HOURLY_REPORT_INTERVAL_SEC = 3600
+HOURLY_REPORT_MAX_WATCHLIST_LINES = 10  # cap so the message stays readable
+HOURLY_REPORT_MAX_TOP_CANDIDATES = 5    # top-N recent unfired candidates to list
+
 # ============ TELEGRAM ============
 TELEGRAM_PARSE_MODE = "Markdown"
 

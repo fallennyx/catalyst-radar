@@ -229,3 +229,221 @@ def test_expire_stale_watchlist_during_tier1(tmp_db):
                       return_value=[]):
         asyncio.run(radar_main.run_discovery_cycle())
     assert storage.get_watchlist_entry("STALE") is None
+
+
+# ---------- startup backfill ----------
+
+def _fake_fetch_rows(ticker: str, hours: int = 240) -> list[dict]:
+    """Build N hourly rows shaped like fetch_bars output."""
+    import time as _t
+    now_h = int(_t.time()) - int(_t.time()) % 3600
+    rows = []
+    for i in range(hours):
+        ts = now_h - (hours - 1 - i) * 3600
+        iso = datetime.utcfromtimestamp(ts).strftime("%Y-%m-%dT%H:%M:%SZ")
+        rows.append({
+            "ts": iso, "ticker": ticker, "asset_class": "crypto_t1",
+            "max_leverage": 10, "open": 100.0 + i, "high": 101.0 + i,
+            "low": 99.0 + i, "price": 100.5 + i,
+            "volume_24h_usd": 1e6, "oi_usd": 1e5, "funding_1h": 0.0,
+            "pct_24h": 0.0, "pct_1h": 0.0,
+        })
+    return rows
+
+
+def test_backfill_happy_path_inserts_bars(tmp_db, monkeypatch):
+    """Fresh DB + 3 mocked tickers → bars_1h gets ~720 rows."""
+    from radar import fetch_bars
+    from radar.universe import Market
+
+    markets = [
+        Market(ticker=t, asset_class="crypto_t1", market_id=t, max_leverage=10.0)
+        for t in ("BTC", "ETH", "SOL")
+    ]
+    monkeypatch.setattr(radar_main.universe, "get_leveraged_universe",
+                        lambda *a, **kw: markets)
+    monkeypatch.setattr(radar_main, "_RUNNING", True)
+    # Speed up: zero pacer + tiny timeout that's still well above thread overhead.
+    monkeypatch.setattr(config, "BACKFILL_SLEEP_BETWEEN_SEC", 0.0)
+
+    routes = dict(fetch_bars.ROUTES)
+    routes["crypto_t1"] = lambda ticker, days, end_ts=None: _fake_fetch_rows(ticker, 240)
+    monkeypatch.setattr(fetch_bars, "ROUTES", routes)
+
+    total = asyncio.run(radar_main._backfill_bars_for_universe())
+    assert total == 720  # 3 tickers × 240 bars
+    rows = storage.execute("SELECT COUNT(*) AS n FROM bars_1h")
+    assert rows[0]["n"] == 720
+
+
+def test_backfill_empty_universe_is_safe(tmp_db, monkeypatch):
+    """Lighter API empty → log warning, return 0, don't crash."""
+    monkeypatch.setattr(radar_main.universe, "get_leveraged_universe",
+                        lambda *a, **kw: [])
+    monkeypatch.setattr(radar_main, "_RUNNING", True)
+    total = asyncio.run(radar_main._backfill_bars_for_universe())
+    assert total == 0
+    rows = storage.execute("SELECT COUNT(*) AS n FROM bars_1h")
+    assert rows[0]["n"] == 0
+
+
+def test_backfill_honors_ticker_route_override(tmp_db, monkeypatch):
+    """PAXG is commodity-classed but the override routes it through fetch_crypto.
+
+    Verified by stubbing both fetchers and asserting only the crypto route is
+    called for PAXG.
+    """
+    from radar import fetch_bars
+    from radar.universe import Market
+
+    markets = [Market(ticker="PAXG", asset_class="commodity",
+                      market_id="PAXG", max_leverage=10.0)]
+    monkeypatch.setattr(radar_main.universe, "get_leveraged_universe",
+                        lambda *a, **kw: markets)
+    monkeypatch.setattr(radar_main, "_RUNNING", True)
+    monkeypatch.setattr(config, "BACKFILL_SLEEP_BETWEEN_SEC", 0.0)
+
+    crypto_calls: list[str] = []
+    yfinance_calls: list[str] = []
+
+    def fake_crypto(ticker, days, end_ts=None):
+        crypto_calls.append(ticker)
+        return _fake_fetch_rows(ticker, 240)
+
+    def fake_yfinance(ticker, days, end_ts=None):
+        yfinance_calls.append(ticker)
+        return _fake_fetch_rows(ticker, 240)
+
+    routes = dict(fetch_bars.ROUTES)
+    routes["crypto_t1"] = fake_crypto
+    routes["commodity"] = fake_yfinance
+    monkeypatch.setattr(fetch_bars, "ROUTES", routes)
+
+    asyncio.run(radar_main._backfill_bars_for_universe())
+    assert crypto_calls == ["PAXG"]
+    assert yfinance_calls == []
+
+
+def test_backfill_isolates_per_ticker_failures(tmp_db, monkeypatch):
+    """One fetcher raises → other tickers still get backfilled."""
+    from radar import fetch_bars
+    from radar.universe import Market
+
+    markets = [
+        Market(ticker=t, asset_class="crypto_t1", market_id=t, max_leverage=10.0)
+        for t in ("BTC", "BROKEN", "ETH")
+    ]
+    monkeypatch.setattr(radar_main.universe, "get_leveraged_universe",
+                        lambda *a, **kw: markets)
+    monkeypatch.setattr(radar_main, "_RUNNING", True)
+    monkeypatch.setattr(config, "BACKFILL_SLEEP_BETWEEN_SEC", 0.0)
+
+    def flaky_fetcher(ticker, days, end_ts=None):
+        if ticker == "BROKEN":
+            raise RuntimeError("simulated API meltdown")
+        return _fake_fetch_rows(ticker, 240)
+
+    routes = dict(fetch_bars.ROUTES)
+    routes["crypto_t1"] = flaky_fetcher
+    monkeypatch.setattr(fetch_bars, "ROUTES", routes)
+
+    total = asyncio.run(radar_main._backfill_bars_for_universe())
+    assert total == 480  # BTC + ETH only
+    btc = storage.execute("SELECT COUNT(*) AS n FROM bars_1h WHERE ticker='BTC'")
+    eth = storage.execute("SELECT COUNT(*) AS n FROM bars_1h WHERE ticker='ETH'")
+    broken = storage.execute("SELECT COUNT(*) AS n FROM bars_1h WHERE ticker='BROKEN'")
+    assert btc[0]["n"] == 240
+    assert eth[0]["n"] == 240
+    assert broken[0]["n"] == 0
+
+
+def test_compute_backfill_hours_skips_when_fresh(tmp_db):
+    """If last bar < BACKFILL_GAP_THRESHOLD_SEC old, return None (skip)."""
+    import time as _t
+    now = int(_t.time())
+    storage.insert_bar(ticker="BTC", ts=now - 60, close=100.0)
+    assert radar_main._compute_backfill_hours("BTC") is None
+
+
+def test_compute_backfill_hours_full_when_empty(tmp_db):
+    """No bars stored → return full BOS_BAR_HISTORY_HOURS."""
+    assert radar_main._compute_backfill_hours("NEVERSEEN") == config.BOS_BAR_HISTORY_HOURS
+
+
+def test_compute_backfill_hours_partial_when_gap(tmp_db):
+    """Bars exist but last is several hours old → return the gap."""
+    import time as _t
+    now = int(_t.time())
+    storage.insert_bar(ticker="BTC", ts=now - 5 * 3600, close=100.0)
+    hours = radar_main._compute_backfill_hours("BTC")
+    assert hours is not None
+    assert 5 <= hours <= 6  # ceil(5h) or ceil(5h + small)
+
+
+# ---------- storage helpers ----------
+
+def test_last_bar_ts_returns_none_when_empty(tmp_db):
+    assert storage.last_bar_ts("NONE") is None
+
+
+def test_last_bar_ts_returns_max(tmp_db):
+    storage.insert_bar(ticker="BTC", ts=1_700_000_000, close=1.0)
+    storage.insert_bar(ticker="BTC", ts=1_700_003_600, close=2.0)
+    storage.insert_bar(ticker="BTC", ts=1_700_001_800, close=3.0)
+    assert storage.last_bar_ts("BTC") == 1_700_003_600
+
+
+def test_prune_old_alerts_deletes_old_keeps_fresh(tmp_db):
+    import time as _t
+    now = int(_t.time())
+    # Seed two alerts directly (record_alert sets created_at to _now())
+    from radar.suppression import Alert
+    from radar.classifier import ClassifierResult
+    cr = ClassifierResult(catalyst_type="none", direction="neutral",
+                         confidence=0.5, summary="x")
+    storage.record_alert(
+        Alert(ticker="FRESH", asset_class="equity", score=1.0,
+              alpha_z=0.0, r_alpha_pct=0.0, classifier_result=cr),
+        decision="DROP", reason="x", classifier=cr,
+    )
+    # Backdate one alert past the prune window
+    storage.execute(
+        "UPDATE alerts SET created_at = ? WHERE ticker = ?",
+        (now - 40 * 86400, "FRESH"),
+    )
+    storage.record_alert(
+        Alert(ticker="KEEPME", asset_class="equity", score=1.0,
+              alpha_z=0.0, r_alpha_pct=0.0, classifier_result=cr),
+        decision="DROP", reason="x", classifier=cr,
+    )
+    removed = storage.prune_old_alerts(days=30)
+    assert removed == 1
+    remaining = storage.execute("SELECT ticker FROM alerts")
+    assert [r["ticker"] for r in remaining] == ["KEEPME"]
+
+
+# ---------- hourly report ----------
+
+def test_hourly_report_renders_with_empty_state(tmp_db):
+    """No watchlist / no recent candidates → still produces a heartbeat body."""
+    radar_main._LAST_SCAN_TS = 0.0
+    radar_main._LAST_TOP_CANDIDATES = []
+    with patch.object(radar_main.universe, "get_leveraged_universe",
+                      return_value=[]):
+        body = radar_main._format_hourly_report()
+    assert "RADAR HOURLY" in body
+    assert "Watchlist empty" in body or "Watchlist: 0" in body
+
+
+def test_hourly_report_lists_watchlist_and_movers(tmp_db):
+    import time as _t
+    _seed_watchlist_entry("AMD", swing_high=362.0)
+    radar_main._LAST_SCAN_TS = _t.time() - 60  # 1 minute ago
+    radar_main._LAST_TOP_CANDIDATES = [("BTC", 8.4, 5.2), ("ETH", 7.1, 3.4)]
+    with patch.object(radar_main.universe, "get_leveraged_universe",
+                      return_value=[]):
+        body = radar_main._format_hourly_report()
+    assert "AMD" in body
+    assert "BTC" in body and "ETH" in body
+    assert "Active watchlist" in body
+    assert "Recent top movers" in body

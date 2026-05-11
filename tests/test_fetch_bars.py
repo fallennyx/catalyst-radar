@@ -293,3 +293,55 @@ def test_csv_output_is_loadable_by_replay(tmp_path, monkeypatch):
     for ts, markets in bars.items():
         assert len(markets) == 1
         assert markets[0].ticker == "BTC"
+
+
+# ============================================================================
+# is_fetchable + TICKER_ROUTE_OVERRIDES
+# ============================================================================
+
+def test_is_fetchable_returns_true_for_any_crypto():
+    """Unmapped crypto tickers report fetchable — fetch_crypto's fallback
+    chain handles them via {TICKER}USDT defaults."""
+    assert fetch_bars.is_fetchable("BTC", "crypto_t1") is True
+    assert fetch_bars.is_fetchable("ETH", "crypto_t1") is True
+    # Unmapped t2 names that DO trade on Binance/Coinbase
+    assert fetch_bars.is_fetchable("UNI", "crypto_t2") is True
+    assert fetch_bars.is_fetchable("PYTH", "crypto_t2") is True
+    assert fetch_bars.is_fetchable("WLD", "crypto_t2") is True
+    # Even exotic ones return True; per-ticker failure isolation handles misses
+    assert fetch_bars.is_fetchable("FARTCOIN", "crypto_meme") is True
+
+
+def test_is_fetchable_for_1000_prefix_memes():
+    """Lighter's 1000PEPE / 1000BONK ticker symbols map to Binance directly."""
+    assert fetch_bars.BINANCE_SYMBOLS["1000PEPE"] == "1000PEPEUSDT"
+    assert "1000BONK" in fetch_bars.BINANCE_SYMBOLS
+    assert "1000FLOKI" in fetch_bars.BINANCE_SYMBOLS
+    assert "1000SHIB" in fetch_bars.BINANCE_SYMBOLS
+    assert fetch_bars.is_fetchable("1000PEPE", "crypto_meme") is True
+    assert fetch_bars.is_fetchable("1000FLOKI", "crypto_meme") is True
+
+
+def test_is_fetchable_paxg_override():
+    """PAXG is commodity-classed but routes via crypto thanks to the override."""
+    assert fetch_bars.TICKER_ROUTE_OVERRIDES["PAXG"] == "crypto_t1"
+    assert fetch_bars.is_fetchable("PAXG", "commodity") is True
+
+
+def test_is_fetchable_equity_passthrough():
+    """Equities always fetchable — yfinance accepts raw symbols."""
+    assert fetch_bars.is_fetchable("AAPL", "equity") is True
+    assert fetch_bars.is_fetchable("HYUNDAIUSD", "equity") is True
+
+
+def test_is_fetchable_forex_requires_mapping():
+    """Forex pairs need an explicit YFINANCE_SYMBOLS entry (the =X suffix)."""
+    assert fetch_bars.is_fetchable("EURUSD", "forex") is True
+    assert fetch_bars.is_fetchable("USDJPY", "forex") is True
+
+
+def test_is_fetchable_commodity_without_mapping_is_unfetchable():
+    """Commodities not in YFINANCE_SYMBOLS or overrides remain unfetchable."""
+    assert fetch_bars.is_fetchable("XAU", "commodity") is True  # mapped to GC=F
+    assert fetch_bars.is_fetchable("NATGAS", "commodity") is True  # mapped to NG=F
+    assert fetch_bars.is_fetchable("FAKEMETAL", "commodity") is False  # no mapping

@@ -15,22 +15,35 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import math
 import os
 import signal
 import sys
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 
 from dotenv import load_dotenv
 
 from . import (
-    beta, catalysts, classifier, config, predictor, ranker, storage,
+    beta, catalysts, classifier, config, fetch_bars, predictor, ranker, storage,
     suppression, telegram, trade_plan, universe,
 )
 from .suppression import Alert
 
 log = logging.getLogger("radar")
+
+
+# Module state shared across loops:
+#   _LAST_PRUNE_TS — last DB prune timestamp; 0.0 forces a prune on first cycle
+#   _LAST_SCAN_TS  — wall time of the last completed Tier 1 cycle; powers the
+#                    hourly report's heartbeat line
+#   _LAST_TOP_CANDIDATES — list of (ticker, score, pct_24h) from the last Tier 1
+#                    scan; surfaced in the hourly report so the user can see
+#                    what's brewing even when no BOS has fired yet
+_LAST_PRUNE_TS: float = 0.0
+_LAST_SCAN_TS: float = 0.0
+_LAST_TOP_CANDIDATES: list[tuple[str, float, float]] = []
 
 
 # ============================================================================
@@ -107,6 +120,270 @@ def build_alert(market: Any, result: Any, history_dict: dict[str, list[float]],
 
 
 # ============================================================================
+# Startup backfill — fill bars_1h so BOS can fire immediately on (re)start
+# ============================================================================
+
+def _compute_backfill_hours(ticker: str) -> int | None:
+    """Returns hours of history to backfill for `ticker`, or None to skip.
+
+    - No bars exist → fetch full BOS_BAR_HISTORY_HOURS (240h).
+    - Last bar < BACKFILL_GAP_THRESHOLD_SEC old → skip (DB is fresh enough).
+    - Otherwise → fetch just the missing tail, capped at 240h.
+    """
+    last = storage.last_bar_ts(ticker)
+    if last is None:
+        return config.BOS_BAR_HISTORY_HOURS
+    gap_sec = int(time.time()) - int(last)
+    if gap_sec < config.BACKFILL_GAP_THRESHOLD_SEC:
+        return None
+    return min(config.BOS_BAR_HISTORY_HOURS, max(1, math.ceil(gap_sec / 3600)))
+
+
+def _parse_iso_to_unix(value: str) -> int | None:
+    """`_iso()` in fetch_bars emits `%Y-%m-%dT%H:%M:%SZ`. Reverse cleanly."""
+    if not value:
+        return None
+    try:
+        v = value.rstrip("Z")
+        dt = datetime.fromisoformat(v).replace(tzinfo=timezone.utc)
+        return int(dt.timestamp())
+    except (TypeError, ValueError):
+        return None
+
+
+def _persist_fetched_rows(ticker: str, rows: list[dict]) -> int:
+    """Bulk-insert fetched rows into bars_1h. Idempotent (INSERT OR REPLACE).
+
+    Per-row try/except so one malformed row can't tank a 240-row batch.
+    """
+    inserted = 0
+    for r in rows or []:
+        try:
+            ts = _parse_iso_to_unix(r.get("ts", ""))
+            if ts is None:
+                continue
+            storage.insert_bar(
+                ticker=ticker,
+                ts=ts,
+                open_=r.get("open"),
+                high=r.get("high"),
+                low=r.get("low"),
+                close=r.get("price"),
+                volume=r.get("volume_24h_usd"),
+                oi=r.get("oi_usd"),
+                funding=r.get("funding_1h"),
+            )
+            inserted += 1
+        except Exception as e:
+            log.debug("backfill %s: skipped malformed row: %s", ticker, e)
+    return inserted
+
+
+async def _backfill_bars_for_universe() -> int:
+    """Fill bars_1h for each Lighter ticker with the missing history tail.
+
+    Runs once at engine start before the Tier 1/2 loops. Idempotent: re-runs
+    on a populated DB log mostly `fresh — skipping` lines. Cancellable on
+    SIGTERM — checks `_RUNNING` between tickers and propagates CancelledError
+    from `asyncio.wait_for`.
+    """
+    log.info("Backfill: starting")
+    markets = universe.get_leveraged_universe()
+    if not markets:
+        log.warning("Backfill: empty Lighter universe — skipping (Tier 1 will retry)")
+        return 0
+
+    fetchable: list[tuple[str, str]] = []
+    unmappable: list[str] = []
+    for m in markets:
+        if fetch_bars.is_fetchable(m.ticker, m.asset_class):
+            fetchable.append((m.ticker, m.asset_class))
+        else:
+            unmappable.append(m.ticker)
+    if unmappable:
+        log.warning(
+            "Backfill: %d tickers have no fetcher mapping — they will cold-start "
+            "the slow way: %s",
+            len(unmappable), unmappable,
+        )
+
+    start = time.time()
+    total_inserted = 0
+    skipped = 0
+    failed = 0
+    fetched = 0
+
+    for i, (ticker, asset_class) in enumerate(fetchable, start=1):
+        if not _RUNNING:
+            log.info("Backfill: cancelled after %d/%d tickers", i - 1, len(fetchable))
+            break
+        hours = _compute_backfill_hours(ticker)
+        if hours is None:
+            skipped += 1
+            continue
+        days = max(1, math.ceil(hours / 24))
+        # Honor per-ticker overrides (e.g. PAXG is commodity-classed but
+        # trades on crypto venues — route via fetch_crypto).
+        route_class = fetch_bars.TICKER_ROUTE_OVERRIDES.get(ticker, asset_class)
+        fetcher = fetch_bars.ROUTES.get(route_class)
+        if fetcher is None:
+            failed += 1
+            continue
+        t0 = time.time()
+        try:
+            rows = await asyncio.wait_for(
+                asyncio.to_thread(fetcher, ticker, days),
+                timeout=config.BACKFILL_PER_TICKER_TIMEOUT_SEC,
+            )
+        except asyncio.TimeoutError:
+            failed += 1
+            log.warning(
+                "Backfill %s: timeout after %ds",
+                ticker, config.BACKFILL_PER_TICKER_TIMEOUT_SEC,
+            )
+            continue
+        except asyncio.CancelledError:
+            log.info("Backfill: cancelled mid-fetch at %s (%d/%d)",
+                     ticker, i, len(fetchable))
+            raise
+        except Exception as e:
+            failed += 1
+            log.warning("Backfill %s: fetch failed: %s", ticker, e)
+            continue
+        inserted = _persist_fetched_rows(ticker, rows or [])
+        total_inserted += inserted
+        fetched += 1
+        dt = time.time() - t0
+        log.info(
+            "Backfill %s: +%d bars in %.1fs (asset_class=%s, %d/%d)",
+            ticker, inserted, dt, asset_class, i, len(fetchable),
+        )
+        await asyncio.sleep(config.BACKFILL_SLEEP_BETWEEN_SEC)
+
+    elapsed = time.time() - start
+    log.info(
+        "Backfill complete: %d bars across %d tickers in %.1fs "
+        "(skipped fresh=%d, failed=%d, unmappable=%d)",
+        total_inserted, fetched, elapsed, skipped, failed, len(unmappable),
+    )
+    return total_inserted
+
+
+# ============================================================================
+# Auto-prune — wired into Tier 1; runs once per PRUNE_INTERVAL_SEC at most
+# ============================================================================
+
+async def _maybe_prune(now_ts: float) -> None:
+    """Prune old bars + alerts if PRUNE_INTERVAL_SEC has elapsed since last run.
+
+    First invocation always fires (`_LAST_PRUNE_TS=0.0`) — cleans up anything
+    stale from a previous deployment sharing the same DB volume.
+    """
+    global _LAST_PRUNE_TS
+    if now_ts - _LAST_PRUNE_TS < config.PRUNE_INTERVAL_SEC:
+        return
+    try:
+        bars_removed = await asyncio.to_thread(
+            storage.prune_old_bars, config.ROLLING_WINDOW_DAYS,
+        )
+        alerts_removed = await asyncio.to_thread(
+            storage.prune_old_alerts, config.PRUNE_ALERTS_DAYS,
+        )
+        log.info(
+            "Prune: removed %d bars >%dd old, %d alerts >%dd old",
+            bars_removed, config.ROLLING_WINDOW_DAYS,
+            alerts_removed, config.PRUNE_ALERTS_DAYS,
+        )
+    except Exception as e:
+        log.warning("Prune failed (will retry next interval): %s", e)
+    _LAST_PRUNE_TS = now_ts
+
+
+# ============================================================================
+# Hourly report — heartbeat + watchlist summary to Telegram
+# ============================================================================
+
+def _md_escape(s: str) -> str:
+    """Mirror radar.telegram._md_escape so the report renders cleanly."""
+    if not s:
+        return ""
+    for ch in ("_", "*", "`", "["):
+        s = s.replace(ch, f"\\{ch}")
+    return s
+
+
+def _format_hourly_report() -> str:
+    """Build the Markdown body for the hourly Telegram report."""
+    now = time.time()
+    if _LAST_SCAN_TS > 0:
+        scan_age_min = (now - _LAST_SCAN_TS) / 60.0
+        scan_age = f"{scan_age_min:.1f}m ago"
+    else:
+        scan_age = "no scan yet"
+
+    try:
+        universe_n = len(universe.get_leveraged_universe())
+    except Exception:
+        universe_n = 0
+
+    try:
+        watchlist = storage.list_active_watchlist()
+    except Exception:
+        watchlist = []
+
+    lines: list[str] = []
+    lines.append(f"📊 *RADAR HOURLY* · last scan {scan_age}")
+    lines.append(f"Universe: {universe_n} tickers · Watchlist: {len(watchlist)}")
+    lines.append("")
+
+    if watchlist:
+        lines.append("*Active watchlist:*")
+        for entry in watchlist[:config.HOURLY_REPORT_MAX_WATCHLIST_LINES]:
+            ticker = _md_escape(str(entry.get("ticker") or "?"))
+            direction = (entry.get("direction_bias") or "?").upper()
+            level_label = ""
+            if direction == "LONG" and entry.get("swing_high_reference") is not None:
+                level_label = f" above ${entry['swing_high_reference']:.4f}"
+            elif direction == "SHORT" and entry.get("swing_low_reference") is not None:
+                level_label = f" below ${entry['swing_low_reference']:.4f}"
+            hours_on = ""
+            added_at = entry.get("added_at")
+            if added_at:
+                try:
+                    dt = datetime.fromisoformat(str(added_at).replace("Z", ""))
+                    age_h = (datetime.utcnow() - dt).total_seconds() / 3600
+                    hours_on = f" · {age_h:.1f}h on list"
+                except Exception:
+                    pass
+            lines.append(f"• {ticker} {direction}{level_label}{hours_on}")
+        extra = len(watchlist) - config.HOURLY_REPORT_MAX_WATCHLIST_LINES
+        if extra > 0:
+            lines.append(f"…and {extra} more")
+        lines.append("")
+    else:
+        lines.append("_Watchlist empty._")
+        lines.append("")
+
+    if _LAST_TOP_CANDIDATES:
+        lines.append("*Recent top movers (no BOS yet):*")
+        for ticker, score, pct in _LAST_TOP_CANDIDATES[:config.HOURLY_REPORT_MAX_TOP_CANDIDATES]:
+            lines.append(f"• {_md_escape(ticker)} · score `{score:.1f}` · {pct:+.2f}%")
+        lines.append("")
+
+    return "\n".join(lines).rstrip()
+
+
+def _send_hourly_report() -> bool:
+    """Send the hourly report via the existing telegram main-chat path."""
+    body = _format_hourly_report()
+    try:
+        return telegram._send_main(body, market_label="hourly_report")
+    except Exception as e:
+        log.warning("Hourly report send failed: %s", e)
+        return False
+
+
+# ============================================================================
 # Tier 1 — discovery scan
 # ============================================================================
 
@@ -132,6 +409,13 @@ async def run_discovery_cycle() -> None:
     candidates = ranker.top_n_movers(markets, histories=histories)
     log.info("Tier 1: %d candidates: %s",
              len(candidates), [m.ticker for m, _ in candidates])
+
+    # Capture top candidates for the hourly report (heartbeat + transparency).
+    global _LAST_TOP_CANDIDATES, _LAST_SCAN_TS
+    _LAST_TOP_CANDIDATES = [
+        (m.ticker, float(s), float(getattr(m, "pct_24h", 0.0) or 0.0))
+        for m, s in candidates[:config.HOURLY_REPORT_MAX_TOP_CANDIDATES]
+    ]
 
     for market, score in candidates:
         try:
@@ -241,6 +525,8 @@ async def run_discovery_cycle() -> None:
                 log.info("Tier 1 → DROP %s: %s", market.ticker, reason)
         except Exception as e:
             log.exception("Tier 1 error on %s: %s", market.ticker, e)
+
+    _LAST_SCAN_TS = time.time()
 
 
 # ============================================================================
@@ -367,6 +653,10 @@ async def tier1_discovery_scan() -> None:
         except Exception as e:
             log.exception("Tier 1 cycle blew up: %s", e)
         elapsed = time.time() - started
+        try:
+            await _maybe_prune(time.time())
+        except Exception as e:
+            log.warning("Prune scheduler hiccup: %s", e)
         sleep_for = max(1, config.FAST_CADENCE_SEC - int(elapsed))
         log.info("Tier 1 done in %.1fs; sleeping %ds", elapsed, sleep_for)
         await asyncio.sleep(sleep_for)
@@ -381,14 +671,41 @@ async def tier2_trigger_watch() -> None:
         await asyncio.sleep(config.TRIGGER_POLL_INTERVAL_SEC)
 
 
+async def tier3_hourly_report() -> None:
+    """Push an hourly heartbeat + watchlist summary to Telegram.
+
+    Doubles as the engine-alive signal: if these stop arriving, something is
+    wrong on the host. Runs on the same event loop as Tier 1/2 — the Telegram
+    send is offloaded to a worker thread to avoid blocking.
+    """
+    while _RUNNING:
+        await asyncio.sleep(config.HOURLY_REPORT_INTERVAL_SEC)
+        if not _RUNNING:
+            break
+        try:
+            await asyncio.to_thread(_send_hourly_report)
+        except Exception as e:
+            log.warning("Hourly report cycle blew up: %s", e)
+
+
 async def main_async() -> None:
     storage.init_db()
     log.info("catalyst-radar starting; tier1=%ds, tier2=%ds",
              config.FAST_CADENCE_SEC, config.TRIGGER_POLL_INTERVAL_SEC)
-    await asyncio.gather(
-        tier1_discovery_scan(),
-        tier2_trigger_watch(),
-    )
+
+    if config.BACKFILL_ENABLED:
+        try:
+            await _backfill_bars_for_universe()
+        except asyncio.CancelledError:
+            log.info("Backfill cancelled — proceeding to shutdown")
+            return
+        except Exception as e:
+            log.exception("Backfill blew up — continuing without it: %s", e)
+
+    loops = [tier1_discovery_scan(), tier2_trigger_watch()]
+    if config.HOURLY_REPORT_ENABLED:
+        loops.append(tier3_hourly_report())
+    await asyncio.gather(*loops)
 
 
 def _graceful_shutdown(signum: int, frame: Any) -> None:  # noqa: ARG001
