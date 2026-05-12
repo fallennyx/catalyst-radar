@@ -230,6 +230,31 @@ def test_fetch_yfinance_uses_symbol_override(monkeypatch):
     assert args[0] == "GC=F"
 
 
+def test_fetch_yfinance_korean_adr_overrides(monkeypatch):
+    """Lighter perps named *USD for Korean equities (HYUNDAIUSD, SAMSUNGUSD,
+    SKHYNIXUSD) and the legacy ``HYUNDAI`` ticker must route to the Korea
+    primary listings (`.KS`) instead of the dead OTC ADR symbols (HYMTF etc.)
+    which yfinance returns no data for.
+    """
+    fake_yf = MagicMock()
+    fake_yf.download.return_value = _FakeDataFrame([])
+    monkeypatch.setitem(__import__("sys").modules, "yfinance", fake_yf)
+
+    expected = {
+        "HYUNDAI":     "005380.KS",
+        "HYUNDAIUSD":  "005380.KS",
+        "SAMSUNGUSD":  "005930.KS",
+        "SKHYNIXUSD":  "000660.KS",
+    }
+    for lighter_ticker, yahoo_sym in expected.items():
+        fake_yf.download.reset_mock()
+        fetch_bars.fetch_yfinance_hourly(lighter_ticker, days=1)
+        args, _ = fake_yf.download.call_args
+        assert args[0] == yahoo_sym, (
+            f"{lighter_ticker} should resolve to {yahoo_sym}, got {args[0]}"
+        )
+
+
 # ---------- routing + write ----------
 
 def test_fetch_universe_routes_by_class(monkeypatch):

@@ -180,6 +180,6 @@ RADAR_HOST=radar ./deploy.sh
 ```
 
 The script rsyncs the repo (excluding `.git/` and `data/`) to
-`/opt/catalyst-radar/` and runs `docker compose up -d --build`. The host's
+`/home/radar/catalyst-radar/` and runs `docker compose up -d --build`. The host's
 `data/radar.db` survives redeploys via the `./data:/app/data` Docker volume
 mount, so subsequent boots just top off the small gap created during rebuild.

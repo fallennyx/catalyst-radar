@@ -14,8 +14,8 @@ sudo usermod -aG docker $USER
 exit                              # log out & back in for group to apply
 
 ssh <user>@<server-ip>
-sudo mkdir -p /opt/catalyst-radar/data
-sudo chown -R $USER:$USER /opt/catalyst-radar
+sudo mkdir -p /home/radar/catalyst-radar/data
+sudo chown -R $USER:$USER /home/radar/catalyst-radar
 exit
 ```
 
@@ -46,14 +46,14 @@ RADAR_HOST=radar ./deploy.sh
 ```
 
 What this does:
-1. `rsync -av --exclude='.git' --exclude='data/'` to `/opt/catalyst-radar/`
+1. `rsync -av --exclude='.git' --exclude='data/'` to `/home/radar/catalyst-radar/`
    (your DB stays put on the host).
 2. `ssh` in and run `docker compose up -d --build`.
 
 ## Watch the boot
 
 ```bash
-ssh radar 'cd /opt/catalyst-radar && docker compose logs -f --tail=100 radar' \
+ssh radar 'cd /home/radar/catalyst-radar && docker compose logs -f --tail=100 radar' \
   | grep -E "Backfill|Tier|Prune|Hourly|ERROR|WARNING"
 ```
 
@@ -72,31 +72,31 @@ and returns in ~5 seconds.
 
 ```bash
 # Tail live logs
-ssh radar 'cd /opt/catalyst-radar && docker compose logs -f --tail=200 radar'
+ssh radar 'cd /home/radar/catalyst-radar && docker compose logs -f --tail=200 radar'
 
 # Restart without rebuilding
-ssh radar 'cd /opt/catalyst-radar && docker compose restart radar'
+ssh radar 'cd /home/radar/catalyst-radar && docker compose restart radar'
 
 # Stop the engine
-ssh radar 'cd /opt/catalyst-radar && docker compose down'
+ssh radar 'cd /home/radar/catalyst-radar && docker compose down'
 
 # DB size on host
-ssh radar 'ls -lh /opt/catalyst-radar/data/radar.db'
+ssh radar 'ls -lh /home/radar/catalyst-radar/data/radar.db'
 
 # Quick DB stats
-ssh radar 'sqlite3 /opt/catalyst-radar/data/radar.db \
+ssh radar 'sqlite3 /home/radar/catalyst-radar/data/radar.db \
   "SELECT COUNT(DISTINCT ticker) AS tickers, COUNT(*) AS bars FROM bars_1h;"'
 
 # Active watchlist
-ssh radar 'sqlite3 /opt/catalyst-radar/data/radar.db \
+ssh radar 'sqlite3 /home/radar/catalyst-radar/data/radar.db \
   "SELECT ticker, direction_bias, swing_high_reference, swing_low_reference, added_at FROM watchlist;"'
 
 # Recent alerts (last 24h)
-ssh radar 'sqlite3 /opt/catalyst-radar/data/radar.db \
+ssh radar 'sqlite3 /home/radar/catalyst-radar/data/radar.db \
   "SELECT ticker, decision, reason, datetime(created_at,'\''unixepoch'\'') FROM alerts ORDER BY created_at DESC LIMIT 20;"'
 
 # Force a full re-backfill (rarely needed)
-ssh radar 'cd /opt/catalyst-radar && docker compose down && \
+ssh radar 'cd /home/radar/catalyst-radar && docker compose down && \
            rm data/radar.db && docker compose up -d'
 ```
 
@@ -115,7 +115,7 @@ Just rerun `RADAR_HOST=radar ./deploy.sh`. Each deploy:
 | Container won't start | `docker compose logs --tail=200 radar` — look for Python tracebacks |
 | No backfill messages in log | `.env` made it over? `config.BACKFILL_ENABLED` still `True`? |
 | No hourly Telegram message after 1h+ | Engine alive? Bot token rotated? See logs for `Hourly report send failed` |
-| `permission denied` writing `data/radar.db` | `ssh radar 'sudo chown -R 1000:1000 /opt/catalyst-radar/data'` |
+| `permission denied` writing `data/radar.db` | `ssh radar 'sudo chown -R 1000:1000 /home/radar/catalyst-radar/data'` |
 | DB growing past 1 GB | Check `Prune: removed N bars` is firing daily; confirm `PRUNE_INTERVAL_SEC` not overridden |
 | Backfill always re-fetches everything | `data/` got rsync'd over by mistake — verify `deploy.sh` has `--exclude='data/'` |
 

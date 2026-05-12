@@ -32,45 +32,11 @@ _load_env()
 # Ensure repo root is importable.
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-import requests  # noqa: E402
-
 from radar import telegram as tg  # noqa: E402
 from radar.trade_plan import TradePlan  # noqa: E402
 
 
-# ---- Monkey-patch the send path so we don't need python-telegram-bot installed
-#      locally. We still exercise the real formatters (_format_alert,
-#      send_bos_alert, _format_plan); only the wire call is swapped to use the
-#      Bot HTTP API directly via `requests`.
 _TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "")
-_API = f"https://api.telegram.org/bot{_TOKEN}/sendMessage"
-
-
-class _FakeBot:
-    """Stub that satisfies tg._bot()'s contract."""
-
-
-def _patched_bot():
-    return _FakeBot() if _TOKEN else None
-
-
-def _patched_send_sync(bot, chat_id, text):
-    r = requests.post(
-        _API,
-        json={
-            "chat_id": chat_id,
-            "text": text,
-            "parse_mode": "Markdown",
-            "disable_web_page_preview": True,
-        },
-        timeout=15,
-    )
-    if not r.ok or not r.json().get("ok", False):
-        raise RuntimeError(f"telegram api {r.status_code}: {r.text[:300]}")
-
-
-tg._bot = _patched_bot
-tg._send_sync = _patched_send_sync
 
 
 def ping() -> bool:
@@ -79,7 +45,7 @@ def ping() -> bool:
         print("FAIL ping: TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID not set")
         return False
     try:
-        _patched_send_sync(None, chat_id, "Catalyst Radar — test ping ✅")
+        tg._send_sync(chat_id, "Catalyst Radar — test ping ✅")
         print("OK ping")
         return True
     except Exception as e:

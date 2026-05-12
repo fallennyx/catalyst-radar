@@ -115,6 +115,22 @@ BACKFILL_ENABLED = True
 BACKFILL_SLEEP_BETWEEN_SEC = 0.6        # pacer between per-ticker fetches
 BACKFILL_PER_TICKER_TIMEOUT_SEC = 30    # hard cap per fetch; we move on after
 BACKFILL_GAP_THRESHOLD_SEC = 3600       # skip ticker if last bar < this old
+# Density check — even if last bar is recent, refuse to skip if we have less
+# than this fraction of the BOS window populated. Prevents the "Tier 1 wrote
+# 3 bars and now backfill thinks we're fresh" trap. 0.5 = need at least 120
+# of the 240 hours present before skipping.
+BACKFILL_MIN_DENSITY_FRAC = 0.5
+
+# Per-class backfill window override. The default is BOS_BAR_HISTORY_HOURS (240h
+# ≈ 10 calendar days) which works for 24/7 crypto. Equities only trade ~6.5h/day
+# so 10 calendar days yields ~65 bars — below the 132-bar 4h-BOS floor. Stretch
+# equities to yfinance's max intraday period (60d) so they reach ~390 bars.
+# yfinance caps intraday `period` at 60d, so values above 60*24 are silently
+# truncated by fetch_yfinance_hourly.
+BACKFILL_HOURS_BY_CLASS: dict[str, int] = {
+    "equity": 60 * 24,
+    "commodity": 60 * 24,
+}
 
 # ============ AUTO-PRUNE ============
 # Wired into the Tier 1 loop. At most one prune per PRUNE_INTERVAL_SEC.
@@ -126,6 +142,11 @@ PRUNE_ALERTS_DAYS = 30                  # alerts older than this get deleted
 # the "engine alive" signal — silence means trouble.
 HOURLY_REPORT_ENABLED = True
 HOURLY_REPORT_INTERVAL_SEC = 3600
+# Seconds past the top of each UTC hour to send. :05 → first Tier 1 cycle of the
+# new 1h bar has completed (so top-mover scores reflect the just-closed bar) and
+# user has ~55 min to act before the next bar closes. Doubles as a 4h-bar-close
+# heartbeat at 00/04/08/12/16/20 UTC + 5 min — those are the actionable slots.
+HOURLY_REPORT_OFFSET_SEC = 300
 HOURLY_REPORT_MAX_WATCHLIST_LINES = 10  # cap so the message stays readable
 HOURLY_REPORT_MAX_TOP_CANDIDATES = 5    # top-N recent unfired candidates to list
 

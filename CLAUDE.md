@@ -173,7 +173,7 @@ These have all bitten this project. Don't repeat them.
 7. **`find_swing_high` / `find_swing_low` use a fallback ladder.** Strict pass returns highest unbroken pivot; fallback (signaled by `bars_validated == 0`) returns the absolute highest in the eligible window when strict logic exhausts. This was added because strict logic returned `None` in trending markets where every candidate gets broken sequentially — losing the reference precisely at the moment a breakout occurs. Don't remove the fallback.
 8. **`SWING_MIN_AGE_HOURS = 4`** excludes the most-recent 4 bars from swing detection so the breakout candle's own wick can't be picked as the reference. Lowering this risks self-reference.
 9. **All datetimes:** UTC unix-int for `bars_1h.ts` and `alerts.created_at`, ISO-8601 strings (naive UTC) for `watchlist.{added_at, expires_at, …}`. **User-facing display uses CDT** via `radar/timefmt.py`. Never mix.
-10. **Telegram lib v21 is async-only.** `telegram.py:_send_sync` runs the coroutine on a private event loop so the rest of the codebase can stay sync. Never block the main asyncio loop with `_send_sync`; if called from Tier 1/2 cycles it works because each cycle is `await asyncio.sleep`-bounded.
+10. **Telegram sends are synchronous HTTP via `requests`.** `telegram.py:_send_sync` POSTs to the Bot API directly. No async lib, no event loops. Tier 3 wraps the call in `asyncio.to_thread(...)` to keep the main event loop unblocked; Tier 1/2 call it inline (each cycle is `await asyncio.sleep`-bounded, so a 15s `requests` timeout is acceptable). **Why this is sync HTTP not `python-telegram-bot`:** the old code cached a `Bot` instance and ran each send on a fresh `asyncio` loop. `python-telegram-bot`'s internal httpx client binds to the first loop it sees, so the second send raised `RuntimeError: Event loop is closed` and the third hit `Pool timeout`. Hourly reports were silently failing in WARNING-level logs. Don't reintroduce `python-telegram-bot` unless you also remove the per-call new-event-loop pattern.
 11. **`BOS_BAR_HISTORY_HOURS = 240` (10 days) is the minimum history fetch for BOS evaluation.** The 4h frame needs ≥ 33 4h-bars (132 1h hours) to fire; main.py and replay.py both pull this much. Don't downsize without checking that 4h synthesis still has enough bars.
 12. **No new dependencies.** `pyproject.toml` is pinned. If you genuinely need one, ask first.
 13. **`main.py` module state powers the hourly report.** `_LAST_SCAN_TS` and `_LAST_TOP_CANDIDATES` are set at the end of `run_discovery_cycle`. `_LAST_PRUNE_TS` is set by `_maybe_prune`. If you refactor Tier 1, keep those writes — Tier 3 reads them through `_format_hourly_report()`.
@@ -311,6 +311,38 @@ For new features:
   - **`BOS_BAR_HISTORY_HOURS = 240`** — main.py and replay.py both pull this
     much history before invoking `has_breakout_structure` (4h synthesis needs
     ≥ 33 4h-bars).
+  - **Telegram bug fix (May 11)** — `radar/telegram.py` was caching a
+    `python-telegram-bot` Bot whose httpx client bound to the first asyncio
+    loop it saw. `_send_sync` created a fresh loop per call and closed it, so
+    the second send onward raised `RuntimeError: Event loop is closed` then
+    `Pool timeout`. Switched to a synchronous `requests.post` against the Bot
+    HTTP API and dropped the `python-telegram-bot` dep. See sharp edge #10.
+  - **Hourly report alignment** — `tier3_hourly_report` now fires at
+    `HOURLY_REPORT_OFFSET_SEC` (default 300s = `:05`) past every UTC hour
+    instead of drifting from boot time. `:05` lands after the just-closed 1h
+    bar has been recorded by Tier 1 and overlaps the 4h-close slots (00/04/08/
+    12/16/20 UTC + 5min) which are the most actionable moments.
+  - **Per-class backfill target** — `BACKFILL_HOURS_BY_CLASS` in `config.py`
+    overrides `BOS_BAR_HISTORY_HOURS` for asset classes whose intraday trading
+    is restricted. Equities/commodities now request 60d (yfinance's intraday
+    max) instead of 10d, lifting equities from ~73 bars to ~390 bars so the
+    132-bar 4h-BOS floor becomes reachable. The density-check window stays at
+    `BOS_BAR_HISTORY_HOURS` so equities re-trigger a full backfill on every
+    boot (acceptable — yfinance equity fetches are ~1s each).
+  - **Korean ADR yfinance overrides** — `YFINANCE_SYMBOLS` adds
+    `HYUNDAIUSD/SAMSUNGUSD/SKHYNIXUSD → 005380.KS/005930.KS/000660.KS` (Korea
+    primary listings, KRW-denominated). The existing `HYUNDAI → HYMTF`
+    mapping was silently broken — HYMTF is delisted/illiquid and yfinance
+    returns no data. The `.KS` listings work; for BOS detection (structural
+    break, not absolute price) the KRW/USD divergence doesn't matter.
+  - **Stooq evaluated, rejected** — replacing yfinance with Stooq was explored
+    for equity coverage. Stooq's CSV endpoint (`stooq.com/q/d/l/?s=...&i=h`)
+    does accept hourly interval codes (verified by HTTP probe) but only
+    returns hourly data for forex (~66 pairs) and indices (~56), **not** for
+    individual stocks/ETFs. A pure swap would break all 12 equities. Do not
+    re-explore Stooq for stock coverage; if forex history depth ever becomes
+    a bottleneck, a hybrid Stooq-forex/yfinance-equity setup is feasible
+    (requires CAPTCHA-gated API key).
 - **In flight (older, unfinished):** wiring `fetch_bars` CLI and
   `replay.load_bars` to use the live Lighter universe + auto-classification
   (`lighter.classify`). The CLI still uses `config.SYMBOL_TO_CLASS`; the

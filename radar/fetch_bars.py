@@ -77,8 +77,16 @@ COINGECKO_IDS: dict[str, str] = {
 }
 
 # yfinance overrides for tickers that don't trade as plain US equities.
+# Korean ADRs: the Lighter `*USD` perp tracks the USD ADR price, but the OTC
+# ADR symbols (HYMTF, SSNLF, HXSCL) are sparsely traded and yfinance returns
+# no data for them. We map to the Korea primary listing (`.KS`, KRW-denominated)
+# instead — for BOS detection (structural break, not price level) the
+# percentage moves correlate ~1:1 so the override is sound.
 YFINANCE_SYMBOLS: dict[str, str] = {
-    "HYUNDAI": "HYMTF",      # OTC ADR
+    "HYUNDAI":     "005380.KS",   # Hyundai Motor — Korea primary (was HYMTF, delisted)
+    "HYUNDAIUSD":  "005380.KS",
+    "SAMSUNGUSD":  "005930.KS",   # Samsung Electronics
+    "SKHYNIXUSD":  "000660.KS",   # SK Hynix
     "XAU": "GC=F",           # gold front-month future
     "XAG": "SI=F",           # silver front-month future
     "XPT": "PL=F",           # platinum front-month future
@@ -87,6 +95,8 @@ YFINANCE_SYMBOLS: dict[str, str] = {
     "NATGAS": "NG=F",        # natural gas front-month future
     "BRENTOIL": "BZ=F",      # Brent crude front-month
     "WTI": "CL=F",           # WTI front-month
+    "WHEAT": "ZW=F",         # wheat front-month future
+    "SPX": "^GSPC",          # S&P 500 cash index (Yahoo prefixes indices with ^)
 }
 
 # Forex routes through yfinance with the "=X" suffix. Injected into

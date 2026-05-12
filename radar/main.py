@@ -90,11 +90,19 @@ def btc_history() -> list[float]:
 
 
 def _record_market_bar(market: Any) -> None:
+    """Fold a live mark-price snapshot into the current 1h bucket's OHLC.
+
+    Lighter only exposes a current price (no in-progress bar OHLC). We must
+    aggregate across the Tier-1 ticks ourselves — otherwise the live bar's
+    high/low stay NULL, ``has_breakout_structure`` sees range = 0, the
+    range-expansion gate never opens, and every cycle becomes
+    ``DROP no_structure_break``.
+    """
     ts = int(time.time()) // 3600 * 3600
-    storage.insert_bar(
+    storage.upsert_bar_from_tick(
         ticker=market.ticker,
         ts=ts,
-        close=market.price,
+        price=market.price,
         volume=market.volume_24h_usd,
         oi=market.oi_usd,
         funding=market.funding_1h,
@@ -123,20 +131,42 @@ def build_alert(market: Any, result: Any, history_dict: dict[str, list[float]],
 # Startup backfill — fill bars_1h so BOS can fire immediately on (re)start
 # ============================================================================
 
-def _compute_backfill_hours(ticker: str) -> int | None:
-    """Returns hours of history to backfill for `ticker`, or None to skip.
+def _compute_backfill_hours(ticker: str, asset_class: str | None = None) -> int | None:
+    """Returns hours of history to backfill for ``ticker``, or None to skip.
 
-    - No bars exist → fetch full BOS_BAR_HISTORY_HOURS (240h).
-    - Last bar < BACKFILL_GAP_THRESHOLD_SEC old → skip (DB is fresh enough).
-    - Otherwise → fetch just the missing tail, capped at 240h.
+    The fetch target defaults to ``BOS_BAR_HISTORY_HOURS`` (240h ≈ 10 calendar
+    days), which is enough for the 4h-BOS frame on a 24/7 asset. For asset
+    classes with intraday-restricted trading (equities only trade ~6.5h/day,
+    so 240 calendar hours yield ~65 bars — below the 132-bar 4h-BOS floor) the
+    target is overridden via ``BACKFILL_HOURS_BY_CLASS``. The density check
+    window stays at ``BOS_BAR_HISTORY_HOURS`` so the threshold semantics don't
+    change for crypto; this means equities re-trigger a full backfill on every
+    boot (they never reach the 120-bar density floor in 240h of calendar time),
+    which is the right trade given equities are rate-limit-bounded by yfinance.
+
+    Two-stage logic:
+
+    1. **Density check** — count bars in the BOS window. If we don't have at
+       least ``BACKFILL_MIN_DENSITY_FRAC`` of the window populated, fetch the
+       full target regardless of recency.
+    2. **Freshness check** — if density is OK and the most recent bar is
+       < BACKFILL_GAP_THRESHOLD_SEC old, skip. Otherwise fetch just the
+       missing tail (clamped to the target window).
     """
+    target = config.BACKFILL_HOURS_BY_CLASS.get(
+        asset_class or "", config.BOS_BAR_HISTORY_HOURS,
+    )
+    bar_count = storage.count_recent_bars(ticker, hours=config.BOS_BAR_HISTORY_HOURS)
+    min_density = int(config.BOS_BAR_HISTORY_HOURS * config.BACKFILL_MIN_DENSITY_FRAC)
+    if bar_count < min_density:
+        return target
     last = storage.last_bar_ts(ticker)
     if last is None:
-        return config.BOS_BAR_HISTORY_HOURS
+        return target
     gap_sec = int(time.time()) - int(last)
     if gap_sec < config.BACKFILL_GAP_THRESHOLD_SEC:
         return None
-    return min(config.BOS_BAR_HISTORY_HOURS, max(1, math.ceil(gap_sec / 3600)))
+    return min(target, max(1, math.ceil(gap_sec / 3600)))
 
 
 def _parse_iso_to_unix(value: str) -> int | None:
@@ -217,7 +247,7 @@ async def _backfill_bars_for_universe() -> int:
         if not _RUNNING:
             log.info("Backfill: cancelled after %d/%d tickers", i - 1, len(fetchable))
             break
-        hours = _compute_backfill_hours(ticker)
+        hours = _compute_backfill_hours(ticker, asset_class)
         if hours is None:
             skipped += 1
             continue
@@ -674,12 +704,17 @@ async def tier2_trigger_watch() -> None:
 async def tier3_hourly_report() -> None:
     """Push an hourly heartbeat + watchlist summary to Telegram.
 
+    Aligned to ``HOURLY_REPORT_OFFSET_SEC`` past the top of each UTC hour
+    (default :05) so the report lands after the just-closed 1h bar has been
+    recorded and scored by Tier 1 — and so it doesn't drift based on boot time.
     Doubles as the engine-alive signal: if these stop arriving, something is
-    wrong on the host. Runs on the same event loop as Tier 1/2 — the Telegram
-    send is offloaded to a worker thread to avoid blocking.
+    wrong on the host. The Telegram send is offloaded to a worker thread to
+    avoid blocking Tier 1/2.
     """
     while _RUNNING:
-        await asyncio.sleep(config.HOURLY_REPORT_INTERVAL_SEC)
+        now = time.time()
+        next_top = (int(now) // 3600 + 1) * 3600 + config.HOURLY_REPORT_OFFSET_SEC
+        await asyncio.sleep(max(1.0, next_top - now))
         if not _RUNNING:
             break
         try:

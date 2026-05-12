@@ -1,39 +1,21 @@
 """Telegram delivery.
 
-We use the synchronous `python-telegram-bot` Bot API. Failures here NEVER raise
-out of `send_alert` / `send_watchlist_notification` — Telegram being down must
-not crash the loop.
+POSTs to the Bot HTTP API via `requests`. Failures here NEVER raise out of
+`send_alert` / `send_watchlist_notification` — Telegram being down must not
+crash the loop.
 """
 
 from __future__ import annotations
 
-import asyncio
 import logging
 import os
 from typing import Any
 
+import requests
+
 from . import config
 
 log = logging.getLogger(__name__)
-
-_BOT = None
-
-
-def _bot():
-    global _BOT
-    if _BOT is not None:
-        return _BOT
-    token = os.environ.get("TELEGRAM_BOT_TOKEN")
-    if not token:
-        log.warning("TELEGRAM_BOT_TOKEN not set — alerts will only be logged")
-        return None
-    try:
-        from telegram import Bot  # type: ignore
-    except Exception as e:
-        log.warning("python-telegram-bot unavailable: %s", e)
-        return None
-    _BOT = Bot(token=token)
-    return _BOT
 
 
 def _watchlist_chat_id() -> str | None:
@@ -96,23 +78,21 @@ def _format_alert(alert: Any, classifier: Any | None) -> str:
     return "\n\n".join(parts)
 
 
-def _send_sync(bot: Any, chat_id: str, text: str) -> None:
-    """python-telegram-bot v21 is async-only. Run the coro on a private loop."""
-    coro = bot.send_message(
-        chat_id=chat_id,
-        text=text,
-        parse_mode=config.TELEGRAM_PARSE_MODE,
-        disable_web_page_preview=True,
+def _send_sync(chat_id: str, text: str) -> None:
+    """POST to the Telegram Bot HTTP API. Raises on HTTP / API error."""
+    token = os.environ.get("TELEGRAM_BOT_TOKEN", "")
+    r = requests.post(
+        f"https://api.telegram.org/bot{token}/sendMessage",
+        json={
+            "chat_id": chat_id,
+            "text": text,
+            "parse_mode": config.TELEGRAM_PARSE_MODE,
+            "disable_web_page_preview": True,
+        },
+        timeout=15,
     )
-    try:
-        asyncio.get_event_loop()
-    except RuntimeError:
-        asyncio.set_event_loop(asyncio.new_event_loop())
-    loop = asyncio.new_event_loop()
-    try:
-        loop.run_until_complete(coro)
-    finally:
-        loop.close()
+    if not r.ok or not r.json().get("ok", False):
+        raise RuntimeError(f"telegram api {r.status_code}: {r.text[:300]}")
 
 
 def send_alert(alert: Any, classifier: Any | None = None) -> bool:
@@ -156,12 +136,11 @@ def _fmt_price(value: float | None, default: str = "—") -> str:
 
 def _send_main(text: str, market_label: str = "?") -> bool:
     log.info("ALERT %s: %s", market_label, text.replace("\n", " | "))
-    bot = _bot()
     chat_id = os.environ.get("TELEGRAM_CHAT_ID")
-    if bot is None or not chat_id:
+    if not os.environ.get("TELEGRAM_BOT_TOKEN") or not chat_id:
         return False
     try:
-        _send_sync(bot, chat_id, text)
+        _send_sync(chat_id, text)
         return True
     except Exception as e:
         log.warning("telegram send failed for %s: %s", market_label, e)
@@ -170,12 +149,11 @@ def _send_main(text: str, market_label: str = "?") -> bool:
 
 def _send_watchlist(text: str, market_label: str = "?") -> bool:
     log.info("WATCHLIST %s: %s", market_label, text.replace("\n", " | "))
-    bot = _bot()
     chat_id = _watchlist_chat_id()
-    if bot is None or not chat_id:
+    if not os.environ.get("TELEGRAM_BOT_TOKEN") or not chat_id:
         return False
     try:
-        _send_sync(bot, chat_id, text)
+        _send_sync(chat_id, text)
         return True
     except Exception as e:
         log.warning("telegram watchlist send failed for %s: %s", market_label, e)

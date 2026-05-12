@@ -246,6 +246,57 @@ def insert_bar(
         )
 
 
+def upsert_bar_from_tick(
+    ticker: str,
+    ts: int,
+    price: float,
+    volume: float | None = None,
+    oi: float | None = None,
+    funding: float | None = None,
+    db_path: str | None = None,
+) -> None:
+    """Aggregate a single mark-price snapshot into the bucket's 1h bar.
+
+    Lighter's universe API only exposes the current mark price (no OHLC for the
+    in-progress bar). Tier 1 fires every FAST_CADENCE_SEC; the naive
+    `insert_bar(close=price)` path overwrites the bar each tick with INSERT OR
+    REPLACE, leaving open/high/low NULL forever — and that nukes BOS detection
+    because ``current_bar.high - current_bar.low`` collapses to 0 so the
+    range-expansion gate at ranker.py:495 never passes.
+
+    Behavior:
+      • Row missing OR existing.open is NULL → seed open=high=low=close=price.
+      • Row exists with open populated (from startup backfill OR a prior tick
+        this same hour) → keep open as-is, extend high=max(high, price),
+        low=min(low, price), update close=price.
+
+    volume/oi/funding are passed through and overwrite (Lighter's volume is a
+    24h-rolling snapshot — the latest tick is the freshest reading).
+    """
+    p = float(price)
+    with _conn(db_path) as cx:
+        row = cx.execute(
+            "SELECT open, high, low FROM bars_1h WHERE ticker=? AND ts=?",
+            (ticker, ts),
+        ).fetchone()
+        if row is not None and row["open"] is not None:
+            new_open = float(row["open"])
+            existing_high = float(row["high"]) if row["high"] is not None else p
+            existing_low = float(row["low"]) if row["low"] is not None else p
+            new_high = max(existing_high, p)
+            new_low = min(existing_low, p)
+        else:
+            new_open = new_high = new_low = p
+        cx.execute(
+            """
+            INSERT OR REPLACE INTO bars_1h
+                (ticker, ts, open, high, low, close, volume, oi, funding)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (ticker, ts, new_open, new_high, new_low, p, volume, oi, funding),
+        )
+
+
 def recent_bars(
     ticker: str,
     hours: int | None = None,
@@ -289,6 +340,22 @@ def last_bar_ts(ticker: str, db_path: str | None = None) -> int | None:
             "SELECT MAX(ts) FROM bars_1h WHERE ticker = ?", (ticker,)
         ).fetchone()
     return int(row[0]) if row and row[0] is not None else None
+
+
+def count_recent_bars(ticker: str, hours: int, db_path: str | None = None) -> int:
+    """Count bars in the last ``hours`` for ticker. Cheap COUNT(*) query.
+
+    Used by the startup backfill's density check — having a recent bar isn't
+    enough; BOS needs ~240 bars in the window to fire. The freshness check
+    alone is fooled by a thin Tier-1-only sliver of bars.
+    """
+    cutoff = _now() - hours * 3600
+    with _conn(db_path) as cx:
+        row = cx.execute(
+            "SELECT COUNT(*) FROM bars_1h WHERE ticker = ? AND ts >= ?",
+            (ticker, cutoff),
+        ).fetchone()
+    return int(row[0]) if row and row[0] is not None else 0
 
 
 def prune_old_alerts(days: int = 30, db_path: str | None = None) -> int:

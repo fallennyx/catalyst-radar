@@ -357,11 +357,19 @@ def test_backfill_isolates_per_ticker_failures(tmp_db, monkeypatch):
     assert broken[0]["n"] == 0
 
 
-def test_compute_backfill_hours_skips_when_fresh(tmp_db):
-    """If last bar < BACKFILL_GAP_THRESHOLD_SEC old, return None (skip)."""
+def _seed_dense_history(ticker: str, hours: int) -> None:
+    """Insert one bar per hour for the last `hours` hours, so the density
+    check passes. Density threshold is currently 0.5 × 240 = 120 bars."""
     import time as _t
     now = int(_t.time())
-    storage.insert_bar(ticker="BTC", ts=now - 60, close=100.0)
+    base = now - (now % 3600)
+    for i in range(hours):
+        storage.insert_bar(ticker=ticker, ts=base - i * 3600, close=100.0 + i)
+
+
+def test_compute_backfill_hours_skips_when_dense_and_fresh(tmp_db):
+    """Dense history (>50% of window) AND last bar < 1h old → skip."""
+    _seed_dense_history("BTC", hours=200)  # well above the 120 density floor
     assert radar_main._compute_backfill_hours("BTC") is None
 
 
@@ -370,14 +378,56 @@ def test_compute_backfill_hours_full_when_empty(tmp_db):
     assert radar_main._compute_backfill_hours("NEVERSEEN") == config.BOS_BAR_HISTORY_HOURS
 
 
-def test_compute_backfill_hours_partial_when_gap(tmp_db):
-    """Bars exist but last is several hours old → return the gap."""
+def test_compute_backfill_hours_full_when_thin_history(tmp_db):
+    """Regression: a recent bar exists but density is below the floor.
+
+    This is the bug the May 2026 server deploy hit — Tier 1 had written 3
+    bars per ticker, the freshness check saw a sub-1h-old bar and returned
+    None, so backfill silently skipped everything and BOS never had data.
+    """
     import time as _t
     now = int(_t.time())
-    storage.insert_bar(ticker="BTC", ts=now - 5 * 3600, close=100.0)
+    base = now - (now % 3600)
+    # 3 recent bars, far below the 120-bar density floor
+    for i in range(3):
+        storage.insert_bar(ticker="BTC", ts=base - i * 3600, close=100.0)
+    assert radar_main._compute_backfill_hours("BTC") == config.BOS_BAR_HISTORY_HOURS
+
+
+def test_compute_backfill_hours_partial_when_dense_and_gap(tmp_db):
+    """Dense history (>50% of window) but last bar is several hours old →
+    fetch just the gap."""
+    import time as _t
+    now = int(_t.time())
+    base = now - (now % 3600)
+    # 200 bars, with the most recent one 5h old
+    for i in range(200):
+        storage.insert_bar(ticker="BTC", ts=base - (5 + i) * 3600, close=100.0 + i)
     hours = radar_main._compute_backfill_hours("BTC")
     assert hours is not None
-    assert 5 <= hours <= 6  # ceil(5h) or ceil(5h + small)
+    assert 5 <= hours <= 6
+
+
+def test_compute_backfill_hours_equity_uses_class_override(tmp_db):
+    """Equities only trade ~6.5h/day, so the BOS-floor density check fails on
+    240h of calendar time even when fully backfilled. The fetch target should
+    come from ``BACKFILL_HOURS_BY_CLASS`` (60d × 24h) so yfinance returns
+    enough trading bars to clear the 132-bar 4h-BOS floor.
+    """
+    assert (
+        radar_main._compute_backfill_hours("AAPL", asset_class="equity")
+        == config.BACKFILL_HOURS_BY_CLASS["equity"]
+    )
+    # Crypto path unchanged — falls back to BOS_BAR_HISTORY_HOURS.
+    assert (
+        radar_main._compute_backfill_hours("BTCNEW", asset_class="crypto_t1")
+        == config.BOS_BAR_HISTORY_HOURS
+    )
+    # Unmapped class falls back to BOS_BAR_HISTORY_HOURS too.
+    assert (
+        radar_main._compute_backfill_hours("NONESUCH", asset_class=None)
+        == config.BOS_BAR_HISTORY_HOURS
+    )
 
 
 # ---------- storage helpers ----------
@@ -391,6 +441,78 @@ def test_last_bar_ts_returns_max(tmp_db):
     storage.insert_bar(ticker="BTC", ts=1_700_003_600, close=2.0)
     storage.insert_bar(ticker="BTC", ts=1_700_001_800, close=3.0)
     assert storage.last_bar_ts("BTC") == 1_700_003_600
+
+
+def test_upsert_bar_from_tick_seeds_ohlc_on_first_tick(tmp_db):
+    """First snapshot of a fresh 1h bucket: open=high=low=close=price."""
+    storage.upsert_bar_from_tick(ticker="BTC", ts=1_700_000_000, price=100.0,
+                                 volume=5_000.0)
+    rows = storage.execute("SELECT * FROM bars_1h WHERE ticker='BTC'")
+    assert len(rows) == 1
+    r = rows[0]
+    assert r["open"] == 100.0
+    assert r["high"] == 100.0
+    assert r["low"] == 100.0
+    assert r["close"] == 100.0
+    assert r["volume"] == 5_000.0
+
+
+def test_upsert_bar_from_tick_aggregates_within_bucket(tmp_db):
+    """Subsequent ticks extend high/low and update close; open is preserved."""
+    ts = 1_700_000_000
+    storage.upsert_bar_from_tick(ticker="BTC", ts=ts, price=100.0)
+    storage.upsert_bar_from_tick(ticker="BTC", ts=ts, price=105.0)
+    storage.upsert_bar_from_tick(ticker="BTC", ts=ts, price=98.0)
+    storage.upsert_bar_from_tick(ticker="BTC", ts=ts, price=102.0)
+    r = storage.execute("SELECT * FROM bars_1h WHERE ticker='BTC'")[0]
+    assert r["open"] == 100.0  # first tick wins, unchanged
+    assert r["high"] == 105.0  # extended up
+    assert r["low"] == 98.0    # extended down
+    assert r["close"] == 102.0 # latest tick
+
+
+def test_upsert_bar_from_tick_extends_backfilled_bar(tmp_db):
+    """Regression: the live-engine "no_structure_break" bug.
+
+    Backfill writes a 17:00 bar with full OHLC. Tier 1's first tick at 17:29
+    must NOT wipe open/high/low (the old insert_bar(close=price) path did this
+    via INSERT OR REPLACE), or has_breakout_structure sees range=0 and BOS
+    never fires. The new path must extend, not overwrite.
+    """
+    ts = 1_700_000_000
+    storage.insert_bar(ticker="FF", ts=ts, open_=0.065, high=0.0729,
+                       low=0.0641, close=0.0723, volume=257_594.0)
+    # Live tick at 0.0710 — inside the existing range. open/high/low unchanged.
+    storage.upsert_bar_from_tick(ticker="FF", ts=ts, price=0.0710,
+                                 volume=260_000.0)
+    r = storage.execute("SELECT * FROM bars_1h WHERE ticker='FF'")[0]
+    assert r["open"] == 0.065
+    assert r["high"] == 0.0729
+    assert r["low"] == 0.0641
+    assert r["close"] == 0.0710
+    # Live tick at 0.0800 — extends the high.
+    storage.upsert_bar_from_tick(ticker="FF", ts=ts, price=0.0800)
+    r = storage.execute("SELECT * FROM bars_1h WHERE ticker='FF'")[0]
+    assert r["high"] == 0.0800
+    assert r["low"] == 0.0641
+    assert r["close"] == 0.0800
+
+
+def test_record_market_bar_produces_nonzero_range_for_bos(tmp_db):
+    """End-to-end: ranker.has_breakout_structure's range check is gated on
+    current_bar.high - current_bar.low. Verify that after a few Tier-1 ticks
+    we have a non-zero range available."""
+    market = _mk_market("AMD", price=370.0)
+    radar_main._record_market_bar(market)
+    market = _mk_market("AMD", price=375.0)
+    radar_main._record_market_bar(market)
+    market = _mk_market("AMD", price=365.0)
+    radar_main._record_market_bar(market)
+    bars = storage.recent_bars("AMD", hours=2)
+    assert bars, "expected at least one bar persisted"
+    last = bars[-1]
+    assert last.high is not None and last.low is not None
+    assert (last.high - last.low) > 0.0  # would be 0 under the old code
 
 
 def test_prune_old_alerts_deletes_old_keeps_fresh(tmp_db):
