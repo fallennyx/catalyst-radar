@@ -17,6 +17,8 @@ import time
 from dataclasses import dataclass
 from typing import Any
 
+import requests
+
 log = logging.getLogger(__name__)
 
 LIGHTER_API = "https://mainnet.zklighter.elliot.ai/api/v1"
@@ -102,11 +104,6 @@ def classify(symbol: str) -> str:
 def _fetch_order_books(timeout: int = 15) -> list[dict] | None:
     """Hit the Lighter mainnet `orderBooks` endpoint. Returns the raw list
     or None on failure."""
-    try:
-        import requests  # noqa: WPS433
-    except Exception as e:
-        log.warning("requests unavailable: %s", e)
-        return None
     try:
         r = requests.get(
             f"{LIGHTER_API}/orderBooks",
@@ -202,11 +199,6 @@ def fetch_market_stats(timeout: int = 15) -> dict[str, dict[str, float]]:
     if (now - _STATS_CACHE["ts"]) < 30 and _STATS_CACHE["by_symbol"]:
         return dict(_STATS_CACHE["by_symbol"])
     try:
-        import requests  # noqa: WPS433
-    except Exception as e:
-        log.warning("requests unavailable: %s", e)
-        return dict(_STATS_CACHE["by_symbol"])
-    try:
         r = requests.get(
             f"{LIGHTER_API}/exchangeStats",
             timeout=timeout,
@@ -247,3 +239,110 @@ def is_listed(ticker: str) -> bool:
         return False
     needle = ticker.upper().strip()
     return any(m.symbol == needle for m in fetch_universe())
+
+
+def market_id_for(ticker: str) -> int | None:
+    """Reverse lookup: symbol → Lighter market_id. None if ticker isn't listed.
+
+    Used by ``fetch_order_book_depth`` since the /orderBookOrders endpoint
+    keys on market_id, not symbol. Backed by the same 60s universe cache.
+    """
+    if not ticker:
+        return None
+    needle = ticker.upper().strip()
+    for m in fetch_universe():
+        if m.symbol == needle:
+            return m.market_id
+    return None
+
+
+# ============ order-book depth ============
+
+def fetch_order_book_depth(
+    market_id: int,
+    levels: int = 10,
+    timeout: int = 8,
+) -> tuple[float, float] | None:
+    """Fetch top-`levels` bid/ask depth (in **USD**) from Lighter.
+
+    Endpoint: ``GET /api/v1/orderBookOrders?market_id=N&limit=N``. Response
+    shape (verified May 2026):
+
+        {
+          "code": 200,
+          "total_asks": 10,
+          "asks": [{"remaining_base_amount": "...", "price": "...", ...}, ...],
+          "total_bids": 10,
+          "bids": [{"remaining_base_amount": "...", "price": "...", ...}, ...]
+        }
+
+    Returns ``(bid_usd, ask_usd)`` summed over the top-`levels` price levels
+    on each side, or ``None`` on any failure (network, non-200, malformed).
+    Failures are advisory-only — order-book imbalance is enrichment, never a
+    gate. Caller should treat ``None`` as "neutral / unknown sentiment".
+    """
+    try:
+        r = requests.get(
+            f"{LIGHTER_API}/orderBookOrders",
+            params={"market_id": int(market_id), "limit": int(levels)},
+            timeout=timeout,
+            headers={"Accept": "application/json", "User-Agent": "catalyst-radar/0.1"},
+        )
+    except Exception as e:
+        log.debug("orderBookOrders request failed (market_id=%s): %s", market_id, e)
+        return None
+    if r.status_code != 200:
+        log.debug("orderBookOrders returned %d for market_id=%s", r.status_code, market_id)
+        return None
+    try:
+        data = r.json()
+    except ValueError:
+        return None
+    bids_usd = _sum_side_usd(data.get("bids") or [])
+    asks_usd = _sum_side_usd(data.get("asks") or [])
+    return (bids_usd, asks_usd)
+
+
+def _sum_side_usd(orders: list[dict]) -> float:
+    """Sum (remaining_base × price) across one side of the book.
+
+    Lighter returns both fields as strings; cast defensively. Any malformed
+    row contributes 0 rather than tanking the aggregate."""
+    total = 0.0
+    for o in orders:
+        try:
+            total += float(o.get("remaining_base_amount", 0.0)) * float(o.get("price", 0.0))
+        except (TypeError, ValueError):
+            continue
+    return total
+
+
+def imbalance_sentiment(bid_usd: float, ask_usd: float) -> tuple[float, str]:
+    """Translate raw bid/ask depth into (ratio, sentiment_label).
+
+    ratio = bid_usd / ask_usd. Buckets:
+        > 2.0   → "strongly bullish"
+        > 1.3   → "bullish"
+        0.77–1.3 → "neutral"
+        < 0.77  → "bearish"
+        < 0.5   → "strongly bearish"
+
+    Returned label is the only thing surfaced to the user (per UX preference:
+    never show raw ratios). LLM prompts get both the label and the raw ratio
+    for reasoning depth."""
+    if ask_usd <= 0 and bid_usd <= 0:
+        return (1.0, "neutral")
+    if ask_usd <= 0:
+        return (float("inf"), "strongly bullish")
+    ratio = bid_usd / ask_usd
+    if ratio > 2.0:
+        label = "strongly bullish"
+    elif ratio > 1.3:
+        label = "bullish"
+    elif ratio < 0.5:
+        label = "strongly bearish"
+    elif ratio < 0.77:
+        label = "bearish"
+    else:
+        label = "neutral"
+    return (ratio, label)

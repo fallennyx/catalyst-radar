@@ -107,13 +107,19 @@ def evaluate(
     market: Any,
     alert: Alert,
     history: list,
+    history_15m: list | None = None,
 ) -> tuple[str, str, dict]:
-    """Run the BOS-aware suppression chain. See module docstring for rule order."""
+    """Run the BOS-aware suppression chain. See module docstring for rule order.
+
+    ``history_15m`` (optional) enables the parallel 15m confirmation gate —
+    BOS fires when EITHER the in-progress 1h or 15m bar's range clears its
+    expansion multiplier. When None, only the 1h gate is evaluated.
+    """
 
     # Compute BOS + watchlist references up-front so every return path can
     # ship them in the metadata dict.
     broke_structure, structure_dir, breakout_level = ranker.has_breakout_structure(
-        market, history, current_price=market.price
+        market, history, current_price=market.price, history_15m=history_15m,
     )
     swing_high_ref, swing_low_ref, swing_ts, median_range = (
         ranker.precompute_references_for_watchlist(market, history)
@@ -131,9 +137,15 @@ def evaluate(
 
     # ---- Rule 0: structural break or watchlist routing ----
     if broke_structure:
+        # NOTE: enrichment-only LLM policy — if the classifier infers a
+        # direction that disagrees with the structural break, we DO NOT
+        # suppress. The structural break is the only trigger. The disagreement
+        # is flagged in the metadata for the alert body so the user sees the
+        # context ("⚠️ LLM disagrees: classifier_dir=…").
         if config.REQUIRE_DIRECTION_AGREEMENT and classifier_dir is not None:
             if structure_dir != classifier_dir:
-                return ("DROP", "structure_direction_conflict", metadata)
+                metadata["direction_conflict"] = True
+                metadata["classifier_direction"] = classifier_dir
         # BOS confirmed → promote any existing watchlist entry for this ticker
         # by removing it (the EMIT we're about to fire supersedes it). Then
         # fall through to the remaining rules.
@@ -183,10 +195,10 @@ def evaluate(
             if abs(alpha_z) < config.ALPHA_Z_MIN or abs(r_alpha) < config.R_ALPHA_MIN_PCT:
                 return ("DROP", "pure_btc_beta", metadata)
 
-    # ---- Rule 3: sector-day clustering ----
-    if storage.count_same_sector_alerts(market.asset_class, hours=config.DEDUP_HOURS) >= config.SECTOR_DAY_THRESHOLD:
-        if not storage.is_top_score_in_sector(market, alert.score, hours=config.DEDUP_HOURS):
-            return ("DROP", "sector_day_member", metadata)
+    # ---- Rule 3 REMOVED ----
+    # Sector-day clustering was suppressing leg-following alerts in hot
+    # sectors. Per the v3 enrichment-only policy, every BOS-confirmed setup
+    # fires — alert fatigue is not a concern.
 
     # ---- Rule 4: daily budget throttle ----
     if storage.count_alerts_today() >= config.DAILY_ALERT_BUDGET:

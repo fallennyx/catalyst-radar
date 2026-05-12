@@ -432,16 +432,13 @@ def _validate_quotes(quotes: list[str], corpus: str) -> bool:
 # ============ public entrypoint ============
 
 def classify(market: Market, news_items: list[NewsItem]) -> ClassifierResult | None:
-    if not news_items:
-        # No catalyst evidence at all → report explicit "none" without an LLM call.
-        return ClassifierResult(
-            catalyst_type="none",
-            direction="neutral",
-            confidence=0.0,
-            summary="No news items found in the lookback window.",
-            evidence_quotes=[],
-            is_actionable=False,
-        )
+    # v3: no early return on empty news. Niche tickers (FF, USELESS, STABLE,
+    # NATGAS, …) rarely surface in mainstream news sources, but their
+    # structural breakouts are the most actionable. The classifier still runs
+    # — with `_format_news_bundle` rendering "(no news items found)" so the
+    # LLM has explicit context — and downstream policy never blocks the alert
+    # based on the LLM's verdict. Whatever the LLM returns (or None on error)
+    # is folded into the alert body as commentary, not as a gate.
 
     # Route by configured provider. Gemini is the cheapest-tier default;
     # Anthropic Haiku is the no-key fallback / opt-in path.

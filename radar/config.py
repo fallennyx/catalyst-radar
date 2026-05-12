@@ -54,8 +54,9 @@ DEDUP_HOURS = 4
 BTC_BETA_LOOKBACK_DAYS = 30
 ALPHA_Z_MIN = 2.0
 R_ALPHA_MIN_PCT = 3.0
-DAILY_ALERT_BUDGET = 20
-SECTOR_DAY_THRESHOLD = 5
+DAILY_ALERT_BUDGET = 30   # v3 (was 20): every BOS-confirmed setup fires
+SECTOR_DAY_THRESHOLD = 5  # vestigial — Rule 3 removed in v3, kept here so any
+                          # legacy import sites still resolve. Unused at runtime.
 
 # ============ LLM ============
 # Provider switch: "gemini" (cheapest, free 1500/day) | "anthropic" (Haiku fallback)
@@ -175,6 +176,17 @@ VOLUME_EXPANSION_MULTIPLIER = 1.5
 # REQUIRE_HTF_TREND_ALIGNMENT=False to make this a soft filter (logged only).
 REQUIRE_HTF_TREND_ALIGNMENT = True
 HTF_TREND_LOOKBACK_HOURS = 168      # 7 days — fits inside BOS_BAR_HISTORY_HOURS=240
+
+# 15m frame — parallel fast-confirmation gate. BOS fires when EITHER the
+# in-progress 1h or 15m bar's range exceeds its expansion multiplier (the 4h
+# structural break stays the binding gate). Higher multiplier than 1h because
+# 15m baselines are noisier — 2.5× is the sweet spot.
+RANGE_EXPANSION_MULTIPLIER_15M = 2.5
+SWING_LOOKBACK_15M_BARS = 96        # 96 15m bars = 24h of recent range history
+BOS_15M_HISTORY_BARS = 200          # backfill target ≈ 50h of 15m bars
+# Coinbase 15m fetch tops out at 300 candles/call (~75h); Bybit 15m at 1000/call
+# (~250h). 200 bars fits comfortably inside both per-call caps.
+BACKFILL_15M_GAP_THRESHOLD_SEC = 900  # skip ticker if last 15m bar < this old
 
 # 4h frame — primary structural BOS reference. Synthesized from 1h bars on the
 # fly (UTC-aligned: 00, 04, 08, 12, 16, 20).

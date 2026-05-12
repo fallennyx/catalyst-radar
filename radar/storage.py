@@ -97,6 +97,21 @@ CREATE TABLE IF NOT EXISTS bars_1h (
 
 CREATE INDEX IF NOT EXISTS idx_bars_ticker_ts ON bars_1h(ticker, ts DESC);
 
+CREATE TABLE IF NOT EXISTS bars_15m (
+    ticker      TEXT NOT NULL,
+    ts          INTEGER NOT NULL,
+    open        REAL,
+    high        REAL,
+    low         REAL,
+    close       REAL,
+    volume      REAL,
+    oi          REAL,
+    funding     REAL,
+    PRIMARY KEY (ticker, ts)
+);
+
+CREATE INDEX IF NOT EXISTS idx_bars_15m_ticker_ts ON bars_15m(ticker, ts DESC);
+
 CREATE TABLE IF NOT EXISTS news_items (
     url_hash    TEXT PRIMARY KEY,
     ticker      TEXT NOT NULL,
@@ -326,6 +341,133 @@ def prune_old_bars(days: int = config.ROLLING_WINDOW_DAYS, db_path: str | None =
     cutoff = _now() - days * 86400
     with _conn(db_path) as cx:
         cur = cx.execute("DELETE FROM bars_1h WHERE ts < ?", (cutoff,))
+        return cur.rowcount
+
+
+# ============ bars_15m (sub-hourly confirmation timeframe) ============
+#
+# Mirrors bars_1h but bucketed to 15-minute intervals (UTC-aligned :00/:15/
+# :30/:45). Used by `ranker.has_breakout_structure` as the **parallel**
+# fast-confirmation gate — the 4h structural break stays sourced from 1h
+# history, only the in-progress range-expansion check runs against the 15m
+# bucket when 15m bars are available. With Tier 1 polling every 60s, the
+# 15m gate clears 5–15 min sooner than the 1h gate on real impulses.
+
+_FIFTEEN_MIN_SECS = 900
+
+
+def floor_to_15m_bucket(ts: int) -> int:
+    """Truncate a unix timestamp down to the start of its 15m bucket."""
+    return int(ts) // _FIFTEEN_MIN_SECS * _FIFTEEN_MIN_SECS
+
+
+def insert_bar_15m(
+    ticker: str,
+    ts: int,
+    open_: float | None = None,
+    high: float | None = None,
+    low: float | None = None,
+    close: float | None = None,
+    volume: float | None = None,
+    oi: float | None = None,
+    funding: float | None = None,
+    db_path: str | None = None,
+) -> None:
+    """Insert/replace a 15m bar. Used by the backfill path with real OHLC
+    from external sources. The live-tick aggregation path uses
+    upsert_bar_15m_from_tick instead, which preserves OHL across writes."""
+    with _conn(db_path) as cx:
+        cx.execute(
+            """
+            INSERT OR REPLACE INTO bars_15m
+                (ticker, ts, open, high, low, close, volume, oi, funding)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (ticker, ts, open_, high, low, close, volume, oi, funding),
+        )
+
+
+def upsert_bar_15m_from_tick(
+    ticker: str,
+    ts: int,
+    price: float,
+    volume: float | None = None,
+    oi: float | None = None,
+    funding: float | None = None,
+    db_path: str | None = None,
+) -> None:
+    """Aggregate a live mark-price snapshot into the current 15m bucket's
+    OHLC. Same read-modify-write pattern as upsert_bar_from_tick — first
+    tick of a bucket seeds open=high=low=close=price; subsequent ticks
+    extend high/low and update close. ``ts`` should already be floored
+    via ``floor_to_15m_bucket``."""
+    p = float(price)
+    with _conn(db_path) as cx:
+        row = cx.execute(
+            "SELECT open, high, low FROM bars_15m WHERE ticker=? AND ts=?",
+            (ticker, ts),
+        ).fetchone()
+        if row is not None and row["open"] is not None:
+            new_open = float(row["open"])
+            existing_high = float(row["high"]) if row["high"] is not None else p
+            existing_low = float(row["low"]) if row["low"] is not None else p
+            new_high = max(existing_high, p)
+            new_low = min(existing_low, p)
+        else:
+            new_open = new_high = new_low = p
+        cx.execute(
+            """
+            INSERT OR REPLACE INTO bars_15m
+                (ticker, ts, open, high, low, close, volume, oi, funding)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (ticker, ts, new_open, new_high, new_low, p, volume, oi, funding),
+        )
+
+
+def recent_bars_15m(
+    ticker: str,
+    hours: int | None = None,
+    bars: int | None = None,
+    db_path: str | None = None,
+) -> list[Bar]:
+    """Return 15m bars for ``ticker`` over the last ``hours`` (or ``bars``×15min)
+    sorted oldest → newest."""
+    if bars is not None:
+        hours = max(1, (bars * 15) // 60 + 1)
+    if hours is None:
+        hours = 50  # default 50h ≈ 200 15m bars (matches BOS_15M_HISTORY_BARS)
+    cutoff = _now() - hours * 3600
+    with _conn(db_path) as cx:
+        cur = cx.execute(
+            "SELECT * FROM bars_15m WHERE ticker = ? AND ts >= ? ORDER BY ts ASC",
+            (ticker, cutoff),
+        )
+        return [_row_to_bar(r) for r in cur.fetchall()]
+
+
+def count_recent_bars_15m(ticker: str, hours: int, db_path: str | None = None) -> int:
+    cutoff = _now() - hours * 3600
+    with _conn(db_path) as cx:
+        row = cx.execute(
+            "SELECT COUNT(*) FROM bars_15m WHERE ticker = ? AND ts >= ?",
+            (ticker, cutoff),
+        ).fetchone()
+    return int(row[0]) if row and row[0] is not None else 0
+
+
+def last_bar_15m_ts(ticker: str, db_path: str | None = None) -> int | None:
+    with _conn(db_path) as cx:
+        row = cx.execute(
+            "SELECT MAX(ts) FROM bars_15m WHERE ticker = ?", (ticker,)
+        ).fetchone()
+    return int(row[0]) if row and row[0] is not None else None
+
+
+def prune_old_bars_15m(days: int = config.ROLLING_WINDOW_DAYS, db_path: str | None = None) -> int:
+    cutoff = _now() - days * 86400
+    with _conn(db_path) as cx:
+        cur = cx.execute("DELETE FROM bars_15m WHERE ts < ?", (cutoff,))
         return cur.rowcount
 
 

@@ -26,8 +26,8 @@ from typing import Any
 from dotenv import load_dotenv
 
 from . import (
-    beta, catalysts, classifier, config, fetch_bars, predictor, ranker, storage,
-    suppression, telegram, trade_plan, universe,
+    beta, catalysts, classifier, config, fetch_bars, lighter, predictor,
+    ranker, storage, suppression, telegram, trade_plan, universe,
 )
 from .suppression import Alert
 
@@ -90,18 +90,29 @@ def btc_history() -> list[float]:
 
 
 def _record_market_bar(market: Any) -> None:
-    """Fold a live mark-price snapshot into the current 1h bucket's OHLC.
+    """Fold a live mark-price snapshot into both the 1h and 15m bucket OHLCs.
 
     Lighter only exposes a current price (no in-progress bar OHLC). We must
-    aggregate across the Tier-1 ticks ourselves — otherwise the live bar's
+    aggregate across Tier-1 ticks ourselves — otherwise the live bar's
     high/low stay NULL, ``has_breakout_structure`` sees range = 0, the
     range-expansion gate never opens, and every cycle becomes
     ``DROP no_structure_break``.
+
+    Writes to both ``bars_1h`` and ``bars_15m`` so the BOS engine's parallel
+    fast-confirmation gate has fresh in-progress 15m data to evaluate.
     """
-    ts = int(time.time()) // 3600 * 3600
+    now = int(time.time())
     storage.upsert_bar_from_tick(
         ticker=market.ticker,
-        ts=ts,
+        ts=now // 3600 * 3600,
+        price=market.price,
+        volume=market.volume_24h_usd,
+        oi=market.oi_usd,
+        funding=market.funding_1h,
+    )
+    storage.upsert_bar_15m_from_tick(
+        ticker=market.ticker,
+        ts=storage.floor_to_15m_bucket(now),
         price=market.price,
         volume=market.volume_24h_usd,
         oi=market.oi_usd,
@@ -209,6 +220,31 @@ def _persist_fetched_rows(ticker: str, rows: list[dict]) -> int:
     return inserted
 
 
+def _persist_fetched_rows_15m(ticker: str, rows: list[dict]) -> int:
+    """Same as _persist_fetched_rows but writes to bars_15m."""
+    inserted = 0
+    for r in rows or []:
+        try:
+            ts = _parse_iso_to_unix(r.get("ts", ""))
+            if ts is None:
+                continue
+            storage.insert_bar_15m(
+                ticker=ticker,
+                ts=ts,
+                open_=r.get("open"),
+                high=r.get("high"),
+                low=r.get("low"),
+                close=r.get("price"),
+                volume=r.get("volume_24h_usd"),
+                oi=r.get("oi_usd"),
+                funding=r.get("funding_1h"),
+            )
+            inserted += 1
+        except Exception as e:
+            log.debug("backfill 15m %s: skipped malformed row: %s", ticker, e)
+    return inserted
+
+
 async def _backfill_bars_for_universe() -> int:
     """Fill bars_1h for each Lighter ticker with the missing history tail.
 
@@ -299,6 +335,77 @@ async def _backfill_bars_for_universe() -> int:
     return total_inserted
 
 
+async def _backfill_bars_15m_for_universe() -> int:
+    """Backfill the bars_15m table for tickers with a 15m route.
+
+    Only crypto tickers have 15m fetchers (Coinbase / Bybit); equity /
+    commodity / forex are skipped (yfinance intraday minimum granularity is
+    workable but adds complexity, and the 15m frame's payoff is largest on
+    24/7 crypto where intra-bar latency is the killer).
+
+    Idempotent: re-runs on a populated DB skip tickers whose latest 15m bar
+    is fresher than ``BACKFILL_15M_GAP_THRESHOLD_SEC``. Target window:
+    ``BOS_15M_HISTORY_BARS`` (~200 bars ≈ 50h).
+    """
+    log.info("Backfill 15m: starting")
+    markets = universe.get_leveraged_universe()
+    if not markets:
+        log.warning("Backfill 15m: empty universe — skipping")
+        return 0
+
+    target_bars = config.BOS_15M_HISTORY_BARS
+    target_hours = target_bars * 15 // 60 + 1   # 51h for 200 bars
+    days = max(1, math.ceil(target_hours / 24))  # 3 days (clamped by fetchers)
+    now = int(time.time())
+
+    total_inserted = 0
+    fetched = 0
+    skipped = 0
+    failed = 0
+
+    for i, m in enumerate(markets, start=1):
+        if not _RUNNING:
+            log.info("Backfill 15m: cancelled after %d/%d tickers", i - 1, len(markets))
+            break
+        route_class = fetch_bars.TICKER_ROUTE_OVERRIDES.get(m.ticker, m.asset_class)
+        fetcher = fetch_bars.ROUTES_15M.get(route_class)
+        if fetcher is None:
+            # equity / commodity / forex — no 15m fetcher; BOS will use 1h only
+            continue
+        last = storage.last_bar_15m_ts(m.ticker)
+        if last is not None and (now - int(last)) < config.BACKFILL_15M_GAP_THRESHOLD_SEC:
+            density = storage.count_recent_bars_15m(m.ticker, hours=target_hours)
+            if density >= int(target_bars * config.BACKFILL_MIN_DENSITY_FRAC):
+                skipped += 1
+                continue
+        try:
+            rows = await asyncio.wait_for(
+                asyncio.to_thread(fetcher, m.ticker, days),
+                timeout=config.BACKFILL_PER_TICKER_TIMEOUT_SEC,
+            )
+        except asyncio.TimeoutError:
+            failed += 1
+            log.warning("Backfill 15m %s: timeout", m.ticker)
+            continue
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:
+            failed += 1
+            log.warning("Backfill 15m %s: fetch failed: %s", m.ticker, e)
+            continue
+        inserted = _persist_fetched_rows_15m(m.ticker, rows or [])
+        total_inserted += inserted
+        fetched += 1
+        log.info("Backfill 15m %s: +%d bars (%d/%d)", m.ticker, inserted, i, len(markets))
+        await asyncio.sleep(config.BACKFILL_SLEEP_BETWEEN_SEC)
+
+    log.info(
+        "Backfill 15m complete: %d bars across %d tickers (skipped fresh=%d, failed=%d)",
+        total_inserted, fetched, skipped, failed,
+    )
+    return total_inserted
+
+
 # ============================================================================
 # Auto-prune — wired into Tier 1; runs once per PRUNE_INTERVAL_SEC at most
 # ============================================================================
@@ -316,12 +423,15 @@ async def _maybe_prune(now_ts: float) -> None:
         bars_removed = await asyncio.to_thread(
             storage.prune_old_bars, config.ROLLING_WINDOW_DAYS,
         )
+        bars_15m_removed = await asyncio.to_thread(
+            storage.prune_old_bars_15m, config.ROLLING_WINDOW_DAYS,
+        )
         alerts_removed = await asyncio.to_thread(
             storage.prune_old_alerts, config.PRUNE_ALERTS_DAYS,
         )
         log.info(
-            "Prune: removed %d bars >%dd old, %d alerts >%dd old",
-            bars_removed, config.ROLLING_WINDOW_DAYS,
+            "Prune: removed %d 1h-bars, %d 15m-bars >%dd old, %d alerts >%dd old",
+            bars_removed, bars_15m_removed, config.ROLLING_WINDOW_DAYS,
             alerts_removed, config.PRUNE_ALERTS_DAYS,
         )
     except Exception as e:
@@ -449,26 +559,30 @@ async def run_discovery_cycle() -> None:
 
     for market, score in candidates:
         try:
-            # Cost gate: skip the LLM call when this candidate has no chance
-            # of EMITting *or* hitting the watchlist. A candidate is "hopeless"
-            # iff (a) no 4h structural break confirmed and (b) score below the
-            # watchlist threshold. This drops ~70-90% of LLM calls in practice
-            # without changing the suppression chain's verdicts.
+            # ---- Load bar history (1h + 15m) ----
             bar_history = storage.recent_bars(
                 market.ticker, hours=config.BOS_BAR_HISTORY_HOURS,
             )
+            bar_history_15m = storage.recent_bars_15m(
+                market.ticker, bars=config.BOS_15M_HISTORY_BARS,
+            )
+
+            # ---- Pre-check BOS using both timeframes ----
             has_bos = False
             if bar_history:
                 try:
                     has_bos, _bk_lvl, _bk_dir = ranker.has_breakout_structure(
                         market, bar_history, market.price,
+                        history_15m=bar_history_15m or None,
                     )
                 except Exception:
                     has_bos = False
-            if (config.SKIP_CLASSIFIER_IF_HOPELESS
-                    and not has_bos
-                    and score < config.WATCHLIST_SCORE_THRESHOLD):
-                # Will drop on Rule 0 `no_structure_break` regardless of catalyst.
+
+            # ---- Cost gate (v3): no LLM unless BOS confirmed ----
+            # Non-BOS candidates always DROP no_structure_break. The score-
+            # based watchlist routing still happens later in suppression Rule 0
+            # for candidates that have BOS but classifier disagrees on direction.
+            if not has_bos:
                 alert = build_alert(market, None, histories.get(market.ticker, {}),
                                     btc_rets=btc_rets, score=score)
                 storage.record_alert(alert, decision="DROP",
@@ -476,26 +590,48 @@ async def run_discovery_cycle() -> None:
                                      classifier=None)
                 continue
 
+            # ---- Order-book sentiment (advisory, fed to LLM + alert body) ----
+            book_sentiment = "neutral"
+            book_ratio: float | None = None
+            try:
+                mid = lighter.market_id_for(market.ticker)
+                if mid is not None:
+                    depth = lighter.fetch_order_book_depth(mid, levels=10)
+                    if depth is not None:
+                        bid_usd, ask_usd = depth
+                        book_ratio, book_sentiment = lighter.imbalance_sentiment(
+                            bid_usd, ask_usd,
+                        )
+            except Exception as e:
+                log.debug("orderbook fetch failed for %s: %s", market.ticker, e)
+
+            # ---- LLM classifier (Stage 1) — enrichment only, never suppresses ----
             news = catalysts.fetch_for_market(market, lookback_hours=config.NEWS_LOOKBACK_HOURS)
             result = classifier.classify(market, news)
+            # Note: classifier.classify no longer short-circuits on empty news
+            # in v3. It may still return None on Gemini errors / fabricated
+            # quote rejection. When None, the alert still fires with a
+            # placeholder result so the LLM never suppresses.
             if result is None:
-                log.info("Tier 1 %s: classifier returned None — DROP", market.ticker)
-                continue
-            if getattr(result, "alert_priority", "NORMAL") == "SUPPRESS":
-                alert = build_alert(market, result, histories.get(market.ticker, {}),
-                                    btc_rets=btc_rets, score=score)
-                storage.record_alert(alert, decision="DROP",
-                                     reason="classifier_suppressed",
-                                     classifier=result)
-                continue
+                log.info("Tier 1 %s: classifier returned None — proceeding with placeholder",
+                         market.ticker)
+                from .classifier import ClassifierResult
+                result = ClassifierResult(
+                    catalyst_type="none", direction="neutral", confidence=0.0,
+                    summary="LLM unavailable — structural break only.",
+                    evidence_quotes=[], is_actionable=True,
+                )
+            # alert_priority="SUPPRESS" is honored only as a flag in the alert
+            # body — does NOT block the alert per the v3 no-suppression policy.
 
             alert = build_alert(market, result, histories.get(market.ticker, {}),
                                 btc_rets=btc_rets, score=score)
-            bar_history = storage.recent_bars(
-                market.ticker,
-                hours=config.BOS_BAR_HISTORY_HOURS,
+            decision, reason, metadata = suppression.evaluate(
+                market, alert, bar_history, history_15m=bar_history_15m or None,
             )
-            decision, reason, metadata = suppression.evaluate(market, alert, bar_history)
+            metadata["book_sentiment"] = book_sentiment
+            if book_ratio is not None:
+                metadata["book_ratio"] = book_ratio
             storage.record_alert(alert, decision=decision, reason=reason,
                                  classifier=result)
 
@@ -509,13 +645,29 @@ async def run_discovery_cycle() -> None:
                     metadata.get("swing_low_reference"),
                 )
             elif decision == "EMIT":
-                plan = trade_plan.compute_plan(
-                    market, bar_history, metadata,
-                    direction=str(getattr(result, "direction", "") or ""),
+                # Determine direction for the trade plan — prefer the
+                # structural direction (BOS-derived) when classifier disagrees
+                # or is neutral. This is consistent with the no-suppression
+                # policy: structure wins.
+                plan_direction = (
+                    metadata.get("structure_direction")
+                    or str(getattr(result, "direction", "") or "")
                 )
-                # ---- Stage 2 enrichment ----
+                plan = trade_plan.compute_plan(
+                    market, bar_history, metadata, direction=plan_direction,
+                )
+                # ---- Volume profile confirmation badge (advisory) ----
+                try:
+                    poc = ranker.compute_volume_profile_poc(bar_history)
+                except Exception:
+                    poc = None
+                metadata["vpoc_price"] = poc
+                metadata["vpoc_near_breakout"] = ranker.is_breakout_near_poc(
+                    metadata.get("breakout_level"), poc,
+                )
+                # ---- Stage 2 enrichment — advisory only ----
                 pred = None
-                if config.STAGE2_ENABLED and plan is not None and result is not None:
+                if config.STAGE2_ENABLED and plan is not None:
                     btc_hist = storage.recent_bars(
                         "BTC", hours=config.STAGE2_BAR_HISTORY_HOURS,
                     )
@@ -527,29 +679,23 @@ async def run_discovery_cycle() -> None:
                     except Exception as e:
                         log.warning("Stage 2 crashed for %s: %s", market.ticker, e)
                         pred = None
-                if pred is not None and pred.verdict == "DROP":
-                    log.info("Tier 1 → Stage 2 DROP %s: %s", market.ticker, pred.thesis[:160])
-                    storage.record_alert(alert, decision="DROP",
-                                         reason="stage2_drop", classifier=result)
-                    continue
-                if pred is not None and pred.verdict == "DOWNGRADE_TO_WATCHLIST":
-                    log.info("Tier 1 → Stage 2 DOWNGRADE %s: %s",
-                             market.ticker, pred.thesis[:160])
-                    storage.record_alert(alert, decision="WATCHLIST",
-                                         reason="stage2_downgrade", classifier=result)
-                    continue
+                # Stage 2 verdicts (DROP / DOWNGRADE_TO_WATCHLIST) are now
+                # ADVISORY — they appear in the alert body as warnings but
+                # never block the alert. v3 policy: BOS is the only suppressor.
                 metadata = {**metadata, "predictor_result": pred}
                 telegram.send_bos_alert(
                     market, result, metadata,
                     source="tier1_immediate", plan=plan,
                 )
                 log.info(
-                    "Tier 1 → EMIT %s %s at break of %s%s",
+                    "Tier 1 → EMIT %s %s at break of %s%s%s",
                     market.ticker,
                     getattr(result, "catalyst_type", "?"),
                     metadata.get("breakout_level"),
                     f" plan(stop={plan.stop:.4f} tp1={plan.tp1:.4f} tp2={plan.tp2:.4f})"
                     if plan is not None else " (no plan)",
+                    f" [stage2={pred.verdict}]"
+                    if pred is not None and pred.verdict != "ALERT_NOW" else "",
                 )
             else:
                 log.info("Tier 1 → DROP %s: %s", market.ticker, reason)
@@ -731,6 +877,7 @@ async def main_async() -> None:
     if config.BACKFILL_ENABLED:
         try:
             await _backfill_bars_for_universe()
+            await _backfill_bars_15m_for_universe()
         except asyncio.CancelledError:
             log.info("Backfill cancelled — proceeding to shutdown")
             return

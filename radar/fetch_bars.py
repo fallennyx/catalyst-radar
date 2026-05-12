@@ -193,6 +193,10 @@ def _floor_hour(ts_sec: float) -> int:
     return int(ts_sec) - (int(ts_sec) % 3600)
 
 
+def _floor_15m(ts_sec: float) -> int:
+    return int(ts_sec) - (int(ts_sec) % 900)
+
+
 def _iso(ts_sec: int) -> str:
     return datetime.fromtimestamp(ts_sec, tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
@@ -705,6 +709,169 @@ def fetch_crypto(ticker: str, days: int, end_ts: int | None = None) -> list[dict
     return fetch_crypto_hourly(ticker, days, end_ts=end_ts)
 
 
+# ============ 15m fetchers (sub-hourly confirmation timeframe) ============
+#
+# Coinbase: granularity=900 (15m), 300 candles/call ≈ 75h per request.
+# Bybit:    interval="15", 1000 candles/call ≈ 250h per request.
+# Binance / CoinGecko not used at 15m (Binance is geo-blocked from the host;
+# CoinGecko's free tier doesn't surface sub-hourly OHLC). For tickers without
+# a Coinbase or Bybit listing the 15m path returns empty and the BOS engine
+# silently falls back to the 1h-only confirmation gate.
+
+
+def fetch_crypto_coinbase_15m(ticker: str, days: int, end_ts: int | None = None) -> list[dict]:
+    """15m OHLC from Coinbase Exchange. Shape mirrors fetch_crypto_coinbase."""
+    s = _session()
+    if s is None:
+        return []
+    raw_ticker = ticker.upper().lstrip("0")
+    if raw_ticker.startswith("1000"):
+        raw_ticker = raw_ticker[4:]
+    product = f"{raw_ticker}-USD"
+    asset_class = config.SYMBOL_TO_CLASS.get(ticker, "crypto_t2")
+
+    end = int(end_ts) if end_ts is not None else int(time.time())
+    start = end - days * 86400
+    granularity = 900
+    window_secs = 300 * granularity  # 300 candles per request ≈ 75h
+
+    all_candles: list[list] = []
+    cursor = start
+    while cursor < end:
+        chunk_end = min(cursor + window_secs, end)
+        try:
+            r = s.get(
+                f"https://api.exchange.coinbase.com/products/{product}/candles",
+                params={
+                    "start": _iso(cursor),
+                    "end": _iso(chunk_end),
+                    "granularity": granularity,
+                },
+                timeout=15,
+            )
+        except Exception as e:
+            log.warning("coinbase 15m %s request failed: %s", ticker, e)
+            break
+        if r.status_code == 404:
+            log.info("coinbase 15m %s: product not listed (404)", product)
+            return []
+        if r.status_code != 200:
+            log.warning("coinbase 15m %s returned %d: %s", ticker, r.status_code, r.text[:160])
+            break
+        try:
+            chunk = r.json()
+        except ValueError:
+            log.warning("coinbase 15m %s returned non-JSON", ticker)
+            break
+        if not isinstance(chunk, list) or not chunk:
+            cursor = chunk_end
+            continue
+        all_candles.extend(chunk)
+        cursor = chunk_end
+
+    all_candles.sort(key=lambda c: c[0])
+    rows: list[dict] = []
+    for c in all_candles:
+        try:
+            ts = _floor_15m(int(c[0]))
+            low = float(c[1]); high = float(c[2])
+            open_ = float(c[3]); close = float(c[4])
+            volume = float(c[5])
+        except (TypeError, ValueError, IndexError):
+            continue
+        rows.append({
+            "ts": _iso(ts), "ticker": ticker, "asset_class": asset_class,
+            "max_leverage": 10,
+            "open": open_, "high": high, "low": low, "price": close,
+            "volume_24h_usd": volume * close,
+            "oi_usd": 0, "funding_1h": 0,
+            "pct_24h": 0.0, "pct_1h": 0.0,
+        })
+    log.info("coinbase 15m %s (%s): %d bars", ticker, product, len(rows))
+    return rows
+
+
+def fetch_crypto_bybit_15m(ticker: str, days: int, end_ts: int | None = None) -> list[dict]:
+    """15m OHLC from Bybit v5. Shape mirrors fetch_crypto_bybit."""
+    s = _session()
+    if s is None:
+        return []
+    sym = BINANCE_SYMBOLS.get(ticker) or f"{ticker}USDT"
+    asset_class = config.SYMBOL_TO_CLASS.get(ticker, "crypto_t2")
+
+    end_ms = (int(end_ts) if end_ts is not None else int(time.time())) * 1000
+    start_ms = end_ms - days * 86400 * 1000
+
+    all_klines: list[list] = []
+    cursor = start_ms
+    while cursor < end_ms:
+        chunk_end = min(cursor + 1000 * 900 * 1000, end_ms)  # 1000 candles × 15m
+        try:
+            r = s.get(
+                "https://api.bybit.com/v5/market/kline",
+                params={
+                    "category": "linear", "symbol": sym, "interval": "15",
+                    "start": cursor, "end": chunk_end, "limit": 1000,
+                },
+                timeout=15,
+            )
+        except Exception as e:
+            log.warning("bybit 15m %s request failed: %s", ticker, e)
+            break
+        if r.status_code != 200:
+            log.warning("bybit 15m %s returned %d: %s", ticker, r.status_code, r.text[:160])
+            break
+        try:
+            data = r.json()
+        except ValueError:
+            log.warning("bybit 15m %s returned non-JSON", ticker)
+            break
+        if data.get("retCode") not in (0, "0"):
+            log.info("bybit 15m %s retCode=%s", ticker, data.get("retCode"))
+            return []
+        chunk = (data.get("result") or {}).get("list") or []
+        if not chunk:
+            cursor = chunk_end
+            continue
+        all_klines.extend(chunk)
+        cursor = chunk_end
+
+    all_klines.sort(key=lambda k: int(k[0]))
+    rows: list[dict] = []
+    for k in all_klines:
+        try:
+            ts = _floor_15m(int(k[0]) // 1000)
+            open_ = float(k[1]); high = float(k[2])
+            low = float(k[3]); close = float(k[4])
+            turnover = float(k[6])
+        except (TypeError, ValueError, IndexError):
+            continue
+        rows.append({
+            "ts": _iso(ts), "ticker": ticker, "asset_class": asset_class,
+            "max_leverage": 10,
+            "open": open_, "high": high, "low": low, "price": close,
+            "volume_24h_usd": turnover,
+            "oi_usd": 0, "funding_1h": 0,
+            "pct_24h": 0.0, "pct_1h": 0.0,
+        })
+    log.info("bybit 15m %s (%s): %d bars", ticker, sym, len(rows))
+    return rows
+
+
+def fetch_crypto_15m(ticker: str, days: int, end_ts: int | None = None) -> list[dict]:
+    """15m crypto router: Coinbase → Bybit. No Binance (geo-block) / CoinGecko
+    (no free sub-hourly). Returns ``[]`` when neither venue lists the ticker;
+    BOS then falls back to 1h-only confirmation."""
+    rows = fetch_crypto_coinbase_15m(ticker, days, end_ts=end_ts)
+    if rows:
+        return rows
+    rows = fetch_crypto_bybit_15m(ticker, days, end_ts=end_ts)
+    if rows:
+        return rows
+    log.info("no 15m source available for %s — 1h-only confirmation", ticker)
+    return []
+
+
 ROUTES = {
     "crypto_t1": fetch_crypto,
     "crypto_t2": fetch_crypto,
@@ -712,6 +879,15 @@ ROUTES = {
     "equity": fetch_yfinance_hourly,
     "commodity": fetch_yfinance_hourly,
     "forex": fetch_yfinance_hourly,
+}
+
+# 15m routes — keyed by asset_class, same as ROUTES. Only crypto today (yfinance
+# intraday minimum is 1m via period=, but we don't need 15m on equities since
+# they're not the speed-bottleneck use case).
+ROUTES_15M: dict[str, "callable"] = {
+    "crypto_t1": fetch_crypto_15m,
+    "crypto_t2": fetch_crypto_15m,
+    "crypto_meme": fetch_crypto_15m,
 }
 
 

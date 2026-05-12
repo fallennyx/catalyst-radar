@@ -146,15 +146,19 @@ def test_bos_not_confirmed_low_score_drops(tmp_db):
     assert storage.get_watchlist_entry("SOL") is None
 
 
-def test_bos_confirmed_direction_conflict_drops(tmp_db):
-    """Long-side BOS but classifier says short → DROP."""
+def test_bos_confirmed_direction_conflict_passes_with_metadata_flag(tmp_db):
+    """v3: direction conflict no longer suppresses. The alert fires; the
+    conflict is flagged in metadata so the alert body can warn the user."""
     market = _market("AMD", asset_class="equity", price=370.0)
     alert = _alert("AMD", asset_class="equity", direction="short")
     history = _bos_history_long_break(price_above=370.0)
 
-    decision, reason, _ = suppression.evaluate(market, alert, history)
-    assert decision == "DROP"
-    assert reason == "structure_direction_conflict"
+    decision, reason, metadata = suppression.evaluate(market, alert, history)
+    assert decision == "EMIT"
+    assert reason == "ok"
+    assert metadata.get("direction_conflict") is True
+    assert metadata.get("classifier_direction") == "short"
+    assert metadata.get("structure_direction") == "long"
 
 
 def test_bos_confirmed_removes_existing_watchlist_entry(tmp_db):
@@ -344,12 +348,13 @@ def test_btc_beta_skipped_for_non_crypto(tmp_db):
     assert reason == "ok"
 
 
-def test_sector_day_clustering(tmp_db):
-    """Once `SECTOR_DAY_THRESHOLD` EMITs land in the asset_class, lower-scoring
-    new candidates DROP. Higher-scoring ones break through."""
+def test_sector_day_no_longer_suppresses(tmp_db):
+    """v3: Rule 3 (sector_day clustering) was removed. When all memes are bid,
+    all memes should fire — alert fatigue is not a concern. Even lower-scoring
+    candidates in a "full" sector should EMIT now."""
     history = _bos_history_long_break(price_above=370.0)
 
-    for i in range(config.SECTOR_DAY_THRESHOLD):
+    for i in range(config.SECTOR_DAY_THRESHOLD + 3):
         seed = _alert(
             ticker=f"FILL{i:02d}", asset_class="equity",
             score=1.0, direction="long",
@@ -357,18 +362,12 @@ def test_sector_day_clustering(tmp_db):
         storage.record_alert(seed, decision="EMIT", reason="ok",
                              classifier=seed.classifier_result)
 
-    # Lower score → DROP via sector_day
+    # Lower score in a saturated sector now fires (was DROP in v2).
     market = _market("AMD", asset_class="equity", price=370.0)
     low = _alert("AMD", asset_class="equity", score=0.5, direction="long")
     decision, reason, _ = suppression.evaluate(market, low, history)
-    assert decision == "DROP"
-    assert reason == "sector_day_member"
-
-    # Higher score breaks through
-    high = _alert("NVDA", asset_class="equity", score=99.0, direction="long")
-    market_nvda = _market("NVDA", asset_class="equity", price=370.0)
-    decision, reason, _ = suppression.evaluate(market_nvda, high, history)
     assert decision == "EMIT"
+    assert reason == "ok"
 
 
 def test_budget_throttle(tmp_db, monkeypatch):

@@ -284,6 +284,28 @@ def send_bos_alert(
 
     plan_block = f"\n\n{_format_plan(plan)}" if plan is not None else ""
 
+    # ---- v3 enrichment badges (advisory only — never gate the alert) ----
+    badges: list[str] = []
+    book_sent = metadata.get("book_sentiment")
+    if book_sent and book_sent != "neutral":
+        emoji = {
+            "strongly bullish": "🟢🟢", "bullish": "🟢",
+            "bearish": "🔴", "strongly bearish": "🔴🔴",
+        }.get(book_sent, "")
+        badges.append(f"{emoji} Crowd: {book_sent}".strip())
+    if metadata.get("vpoc_near_breakout"):
+        vpoc = metadata.get("vpoc_price")
+        if vpoc:
+            badges.append(f"💪 VPOC confirmed @ ${_fmt_price(vpoc)}")
+        else:
+            badges.append("💪 VPOC confirmed")
+    elif metadata.get("vpoc_price") is not None:
+        badges.append("⚪ No volume node near break")
+    if metadata.get("direction_conflict"):
+        cdir = metadata.get("classifier_direction", "?")
+        badges.append(f"⚠️ LLM disagrees (says {cdir})")
+    badges_block = ("\n" + " · ".join(badges)) if badges else ""
+
     # Stage 2 enrichment lines — appear only when predictor populated them.
     entry_line = (
         f"\n*Entry:* {_md_escape(entry_guidance)}" if entry_guidance else ""
@@ -296,7 +318,7 @@ def send_bos_alert(
         risks_block = "\n\n*Risks:*\n" + "\n".join(f"• {_md_escape(r)}" for r in risks[:3])
 
     body = (
-        f"{direction_emoji} *RADAR — {ticker}* {pct_24h:+.2f}%{promoted_tag}\n"
+        f"{direction_emoji} *RADAR — {ticker}* {pct_24h:+.2f}%{promoted_tag}{badges_block}\n"
         f"{asset_class}{_session_tag(market)}\n\n"
         f"*BOS confirmed:* {direction.upper()} above ${_fmt_price(breakout_level)}\n"
         f"*Catalyst:* {_md_escape(primary)}\n"

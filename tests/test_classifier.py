@@ -121,15 +121,25 @@ def test_classify_drops_fabricated_evidence(monkeypatch):
     assert classifier.classify(_market(), _news()) is None
 
 
-def test_classify_returns_none_with_empty_news(monkeypatch):
-    # No client call should be made when news list is empty; we get an explicit "none".
+def test_classify_calls_llm_even_with_empty_news(monkeypatch):
+    """v3 behavior: empty news no longer short-circuits — the classifier
+    sends a structural-only prompt to the LLM so niche-ticker breakouts
+    (FF, USELESS, STABLE) still get LLM commentary in the alert body."""
+    # Force Anthropic provider so we can spy on the client; default is gemini.
+    monkeypatch.setattr(classifier.config, "LLM_PROVIDER", "anthropic")
     sentinel = MagicMock()
-    monkeypatch.setattr(classifier, "_client", lambda: sentinel)
+    payload = {
+        "catalyst_type": "none", "direction": "neutral", "confidence": 0.2,
+        "summary": "no clear news catalyst — structural break only",
+        "evidence_quotes": [],
+    }
+    monkeypatch.setattr(classifier, "_client",
+                        lambda: _stub_client_returning(payload))
     result = classifier.classify(_market(), [])
+    # The LLM was called and returned a real result (not the synthetic
+    # is_actionable=False placeholder of v2).
     assert result is not None
     assert result.catalyst_type == "none"
-    assert result.is_actionable is False
-    sentinel.messages.create.assert_not_called()
 
 
 def test_classify_returns_none_when_client_unavailable(monkeypatch):

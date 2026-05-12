@@ -252,6 +252,61 @@ def test_has_breakout_structure_uses_live_price_over_close():
     assert level == 100.0
 
 
+def test_has_breakout_structure_15m_parallel_fires_when_1h_alone_would_not():
+    """v3: 15m frame parallel confirmation. The 1h bar has a normal range
+    (would NOT clear the 1h gate alone), but the in-progress 15m bar shows a
+    wide impulse — BOS should fire on the 15m confirmation path."""
+    bars_1h = _bars_with_4h_pivot_high()
+    # 1h in-progress bar: live price above 100 but bar range too tight for 1h gate
+    bars_1h[-1] = _bar(ts=199 * 3600, high=103.0, low=102.5, close=102.8)
+
+    # 15m history: 96 flat 15m bars (stable median range), then a wide
+    # impulse on the in-progress 15m bucket.
+    bars_15m: list = []
+    for i in range(96):
+        bars_15m.append(_bar(ts=i * 900, high=102.6, low=102.4, close=102.5))
+    # impulse bar — range 1.0 vs median 0.2 → 5× expansion, well above 2.5×.
+    bars_15m.append(_bar(ts=96 * 900, high=103.0, low=102.0, close=102.9))
+
+    market = Market(ticker="TEST", asset_class="crypto_t1")
+    # Without history_15m: should NOT fire (1h gate too narrow).
+    broke_1h_only, _, _ = ranker.has_breakout_structure(
+        market, bars_1h, current_price=103.0,
+    )
+    assert broke_1h_only is False, "1h gate should not clear on a 0.5-range bar"
+    # With history_15m: SHOULD fire on the 15m gate.
+    broke, direction, level = ranker.has_breakout_structure(
+        market, bars_1h, current_price=103.0, history_15m=bars_15m,
+    )
+    assert broke is True
+    assert direction == "long"
+    assert level == 100.0
+
+
+def test_compute_volume_profile_poc_finds_highest_volume_node():
+    """Volume-by-price histogram: the price where the most trading happened
+    should be returned as the POC."""
+    bars: list = []
+    # 30 bars at price 100 (low volume) + 30 bars at price 105 (high volume).
+    for i in range(30):
+        bars.append(Bar(ticker="X", ts=i * 3600, open=100.0, high=100.5,
+                        low=99.5, close=100.0, volume=1.0, oi=0.0, funding=0.0))
+    for i in range(30):
+        bars.append(Bar(ticker="X", ts=(30 + i) * 3600, open=105.0, high=105.5,
+                        low=104.5, close=105.0, volume=100.0, oi=0.0, funding=0.0))
+    poc = ranker.compute_volume_profile_poc(bars, n_buckets=10)
+    assert poc is not None
+    # POC should be much closer to 105 than 100.
+    assert abs(poc - 105.0) < abs(poc - 100.0)
+
+
+def test_is_breakout_near_poc():
+    assert ranker.is_breakout_near_poc(100.0, 100.4) is True   # 0.4% within ±0.5%
+    assert ranker.is_breakout_near_poc(100.0, 101.0) is False  # 1.0% outside
+    assert ranker.is_breakout_near_poc(None, 100.0) is False
+    assert ranker.is_breakout_near_poc(100.0, None) is False
+
+
 def test_has_breakout_structure_short_history_returns_no_break():
     """Without enough 1h history to synthesize 33+ 4h bars, no BOS can fire."""
     bars: list[Bar] = []

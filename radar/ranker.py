@@ -374,6 +374,60 @@ def find_swing_low(
     return None
 
 
+def compute_volume_profile_poc(
+    bars: list,
+    n_buckets: int = 30,
+) -> float | None:
+    """Volume-by-price histogram → point-of-control (highest-volume price).
+
+    Buckets the close-price range over ``bars`` into ``n_buckets`` equal-width
+    slices and sums each bar's volume into the slice containing its close.
+    The POC is the midpoint of the highest-volume slice — the price where the
+    most trading happened over the lookback window. Useful as a "real" S/R
+    reference: a break above a high-volume node is structurally more
+    meaningful than a break above a random recent high.
+
+    Returns ``None`` if bars are insufficient or volume is uniformly zero.
+    """
+    closes_vols: list[tuple[float, float]] = []
+    for b in bars:
+        c = getattr(b, "close", None)
+        v = getattr(b, "volume", None)
+        if c is None or v is None:
+            continue
+        cf, vf = float(c), float(v)
+        if vf > 0 and cf > 0:
+            closes_vols.append((cf, vf))
+    if len(closes_vols) < n_buckets:
+        return None
+    prices = [c for c, _ in closes_vols]
+    lo, hi = min(prices), max(prices)
+    if hi <= lo:
+        return None
+    width = (hi - lo) / n_buckets
+    buckets = [0.0] * n_buckets
+    for c, v in closes_vols:
+        idx = min(int((c - lo) / width), n_buckets - 1)
+        buckets[idx] += v
+    best = max(range(n_buckets), key=lambda i: buckets[i])
+    poc_price = lo + (best + 0.5) * width
+    return float(poc_price)
+
+
+def is_breakout_near_poc(
+    breakout_level: float | None,
+    poc_price: float | None,
+    tolerance_pct: float = 0.005,
+) -> bool:
+    """True if the breakout level is within ±tolerance_pct of the VPOC.
+    Used as a confirmation badge in the alert body — not a suppression gate.
+    A break that aligns with the volume node is structurally bigger than a
+    break above a random recent high."""
+    if breakout_level is None or poc_price is None:
+        return False
+    return abs(float(breakout_level) - float(poc_price)) / float(poc_price) <= tolerance_pct
+
+
 def compute_median_range(bars: list) -> float:
     """Median (high - low) over the provided bars."""
     ranges: list[float] = []
@@ -458,17 +512,53 @@ def htf_trend_aligned(history: list, direction: str, lookback_hours: int) -> boo
     return True
 
 
+def _confirm_range_expansion(
+    history: list,
+    multiplier: float,
+    lookback_window: int,
+) -> bool:
+    """Check the in-progress bar's range + volume against the lookback median.
+
+    Used by both the 1h and 15m confirmation paths in has_breakout_structure.
+    Returns True iff the bar at history[-1] has range > multiplier × median
+    AND (if volume data is present) volume > VOLUME_EXPANSION_MULTIPLIER ×
+    median volume.
+    """
+    if not history:
+        return False
+    lookback = history[-(lookback_window + 1):-1]
+    if len(lookback) < 10:
+        return False
+    median_range = compute_median_range(lookback)
+    if median_range <= 0:
+        return False
+    current_bar = history[-1]
+    current_range = float((current_bar.high or 0.0) - (current_bar.low or 0.0))
+    if current_range <= multiplier * median_range:
+        return False
+    if config.REQUIRE_VOLUME_CONFIRMATION:
+        median_vol = compute_median_volume(lookback)
+        current_vol = float(getattr(current_bar, "volume", 0.0) or 0.0)
+        if median_vol > 0 and current_vol > 0:
+            if current_vol < config.VOLUME_EXPANSION_MULTIPLIER * median_vol:
+                return False
+    return True
+
+
 def has_breakout_structure(
     market: Any,
     history: list,
     current_price: float | None = None,
+    history_15m: list | None = None,
 ) -> tuple[bool, str | None, float | None]:
-    """Multi-timeframe BOS detection.
+    """Multi-timeframe BOS detection with parallel 1h+15m confirmation gates.
 
     A break is confirmed when:
-      1. The in-progress 1h bar's range exceeds RANGE_EXPANSION_MULTIPLIER ×
-         median 1h range (the trigger event — confirmation that the move is
-         impulsive on the lower timeframe).
+      1. **Either** the in-progress **1h** bar's range exceeds
+         RANGE_EXPANSION_MULTIPLIER × median 1h range, **OR** the in-progress
+         **15m** bar's range exceeds RANGE_EXPANSION_MULTIPLIER_15M × median
+         15m range. Whichever clears first wins — this shrinks alert latency
+         from ~10–30 min (1h-only) to ~1–5 min on most real impulses.
       2. Live price has crossed a 4h structural swing high (long) or swing
          low (short). 4h bars are synthesized UTC-aligned from the 1h history.
 
@@ -483,29 +573,21 @@ def has_breakout_structure(
     else:
         current_price = float(current_price)
 
-    # ---- 1h confirmation: range expansion on the in-progress hourly bar ----
-    lookback_1h = history[-(config.SWING_LOOKBACK_HOURS + 1):-1]
-    if len(lookback_1h) < 10:
+    # ---- Confirmation: 1h OR 15m range expansion ----
+    confirmed_1h = _confirm_range_expansion(
+        history,
+        multiplier=config.RANGE_EXPANSION_MULTIPLIER,
+        lookback_window=config.SWING_LOOKBACK_HOURS,
+    )
+    confirmed_15m = False
+    if history_15m:
+        confirmed_15m = _confirm_range_expansion(
+            history_15m,
+            multiplier=config.RANGE_EXPANSION_MULTIPLIER_15M,
+            lookback_window=config.SWING_LOOKBACK_15M_BARS,
+        )
+    if not (confirmed_1h or confirmed_15m):
         return (False, None, None)
-    median_range_1h = compute_median_range(lookback_1h)
-    if median_range_1h <= 0:
-        return (False, None, None)
-    current_bar = history[-1]
-    current_range = float((current_bar.high or 0.0) - (current_bar.low or 0.0))
-    if current_range <= config.RANGE_EXPANSION_MULTIPLIER * median_range_1h:
-        return (False, None, None)
-
-    # ---- 1h volume confirmation ----
-    # A 2x range candle on dead volume is the textbook fakeout signature.
-    # Real breakouts are accompanied by elevated participation.
-    if config.REQUIRE_VOLUME_CONFIRMATION:
-        median_vol_1h = compute_median_volume(lookback_1h)
-        current_vol = float(getattr(current_bar, "volume", 0.0) or 0.0)
-        # If we have no usable volume data, don't block — some sources (early
-        # CoinGecko fallback) emit zero volumes. Trust range alone in that case.
-        if median_vol_1h > 0 and current_vol > 0:
-            if current_vol < config.VOLUME_EXPANSION_MULTIPLIER * median_vol_1h:
-                return (False, None, None)
 
     # ---- 4h structural break ----
     bars_4h = synthesize_4h_bars(history)

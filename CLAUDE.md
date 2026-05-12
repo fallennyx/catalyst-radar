@@ -61,10 +61,10 @@ deploy-quickref.md   end-to-end deploy walkthrough (ssh + docker compose)
 
 ---
 
-## BOS engine — multi-timeframe (Phase 1, May 2026)
+## BOS engine — multi-timeframe (v3, May 2026)
 
-`ranker.has_breakout_structure(market, history, current_price)` fires only
-when **both** conditions are true:
+`ranker.has_breakout_structure(market, history, current_price, history_15m=None)`
+fires when **both** conditions are true:
 
 1. **4h structural break** — live price has crossed a UTC-aligned 4h-frame swing
    high (long) or swing low (short). 4h bars are synthesized on the fly via
@@ -72,9 +72,18 @@ when **both** conditions are true:
    (240) of 1h history. Pivots use `find_swing_high/_low` reused with 4h params:
    `SWING_LOOKBACK_4H_BARS=30`, `SWING_MIN_AGE_4H_BARS=1`,
    `SWING_MIN_BARS_VALIDATION_4H=2` (loose: 8h validation).
-2. **1h range expansion confirmation** — the in-progress 1h bar's range
-   exceeds `RANGE_EXPANSION_MULTIPLIER × median 1h range` over the lookback
-   window (current threshold: 2.0×, was 1.5× pre-MTF).
+2. **Range expansion confirmation on EITHER timeframe** (v3 parallel gate):
+   - The in-progress **1h** bar's range exceeds
+     `RANGE_EXPANSION_MULTIPLIER × median 1h range` (2.0× over 48 bars), OR
+   - The in-progress **15m** bar's range exceeds
+     `RANGE_EXPANSION_MULTIPLIER_15M × median 15m range` (2.5× over 96 bars).
+
+The 15m parallel path shrinks alert latency from ~10–30 min (1h-only) to
+~1–5 min on real impulses. 15m bars come from `bars_15m` — backfilled at
+boot from Coinbase 15m (granularity=900) / Bybit 15m (interval=15), and
+aggregated live each Tier-1 cycle via `storage.upsert_bar_15m_from_tick`.
+Equity/commodity/forex tickers have no 15m route — the call gracefully
+falls back to 1h-only confirmation for those.
 
 `metadata["breakout_level"]` is the **4h** swing reference. The watchlist also
 stores 4h levels (Tier 2 polls live price vs. those references with the 1h
@@ -89,21 +98,27 @@ and Rule 0 routes to WATCHLIST (if score is high enough) or DROP.
 
 ---
 
-## Five-rule suppression chain (in order — first match wins)
+## Suppression chain (v3 — enrichment-only LLM, BOS is the only suppressor)
 
-`suppression.evaluate(market, alert, history) -> tuple[decision, reason, metadata]`
+`suppression.evaluate(market, alert, history, history_15m=None) -> tuple[decision, reason, metadata]`
+
+**Core invariant**: every BOS-confirmed candidate fires. LLM/predictor/
+order-book/volume-profile layers attach commentary but **never block an
+alert**. Alert fatigue is not a concern; missed signals are.
 
 1. **Rule 0 — Structural BOS check.**
    - BOS confirmed + direction agrees with classifier → continue to Rule 1, remove any existing watchlist entry.
-   - BOS confirmed + direction conflict → DROP `structure_direction_conflict`.
+   - BOS confirmed + direction conflict → **pass-through with metadata flag** (`direction_conflict=True`, `classifier_direction=...`). Alert fires with "⚠️ LLM disagrees" badge.
    - No BOS + score ≥ `WATCHLIST_SCORE_THRESHOLD` + classifier dir ∈ {long, short} → WATCHLIST.
    - No BOS + low score → DROP `no_structure_break`.
-2. **Rule 1 — Per-catalyst dedup (4 h).** Same ticker + same `catalyst_type` already EMIT'd → DROP `dedup_4h`.
+2. **Rule 1 — Per-catalyst dedup (4 h).** Same ticker + same `catalyst_type` already EMIT'd → DROP `dedup_4h`. Prevents the same setup re-firing every cycle.
 3. **Rule 2 — BTC-beta gate (crypto only, OR-gated).** Drops if `|alpha_z| < 2.0` OR `|r_alpha| < 3 %`. **Bypassed when `current_bar.range > IMPULSE_BYPASS_MULTIPLIER * median_range` (2.5×)** — that's the carve-out that lets first-leg breakouts through.
-4. **Rule 3 — Sector-day cluster.** Asset_class hit `SECTOR_DAY_THRESHOLD` (5) recent EMITs → only the top-score new candidate breaks through.
-5. **Rule 4 — Daily budget.** Hit `DAILY_ALERT_BUDGET` (10) → only above-median-score candidates fire.
+4. ~~**Rule 3 — Sector-day cluster.**~~ **REMOVED in v3** — when all memes are bid, all memes should fire. `config.SECTOR_DAY_THRESHOLD` is vestigial.
+5. **Rule 4 — Daily budget.** Hit `DAILY_ALERT_BUDGET` (30 in v3, was 20) → only above-median-score candidates fire. The 30-cap is so high that real BOS-only EMITs almost never trip it.
 
-**Survivors → EMIT `ok`.**
+**Survivors → EMIT `ok`.** EMITs then run through Stage 1 (classifier) and
+Stage 2 (predictor) for **enrichment only** — verdicts go into the alert
+body but never cause a DROP/DOWNGRADE post-EMIT.
 
 ---
 
@@ -163,6 +178,16 @@ If the message stops arriving, the engine is down.
 ## Sharp edges — read before touching code
 
 These have all bitten this project. Don't repeat them.
+
+> **v3 NO-SUPPRESSION INVARIANT (read first).** Enrichment layers (LLM
+> classifier, Stage 2 predictor, order-book sentiment, volume profile)
+> **never block an alert**. BOS is the only suppressor. If you find yourself
+> adding a `return ("DROP", ...)` for a non-structural reason, stop. Flag it
+> in `metadata` and let the Telegram body warn the user, or drop the check
+> entirely. The dirt-cheap cost of a false-positive alert is far less than
+> the cost of missing a real signal (see May 11–12 incident).
+> `tests/test_suppression.py::test_bos_confirmed_direction_conflict_passes_with_metadata_flag`
+> pins this.
 
 1. **`storage.recent_bars()` returns `list[Bar]`, not sqlite3.Row.** `Bar` has `__getitem__` so `r["close"]` still works for legacy callers, but new code should use `r.close` (attribute access).
 2. **`storage.insert_bar(open_=…)` — note the trailing underscore.** `open` is a Python builtin.
