@@ -118,8 +118,10 @@ def evaluate(
 
     # Compute BOS + watchlist references up-front so every return path can
     # ship them in the metadata dict.
-    broke_structure, structure_dir, breakout_level = ranker.has_breakout_structure(
-        market, history, current_price=market.price, history_15m=history_15m,
+    broke_structure, structure_dir, breakout_level, structure_type = (
+        ranker.has_breakout_structure(
+            market, history, current_price=market.price, history_15m=history_15m,
+        )
     )
     swing_high_ref, swing_low_ref, swing_ts, median_range = (
         ranker.precompute_references_for_watchlist(market, history)
@@ -127,6 +129,7 @@ def evaluate(
     metadata = {
         "breakout_level": breakout_level,
         "structure_direction": structure_dir,
+        "structure_type": structure_type,
         "swing_high_reference": swing_high_ref,
         "swing_low_reference": swing_low_ref,
         "swing_reference_timestamp": swing_ts,

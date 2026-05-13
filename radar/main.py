@@ -571,7 +571,7 @@ async def run_discovery_cycle() -> None:
             has_bos = False
             if bar_history:
                 try:
-                    has_bos, _bk_lvl, _bk_dir = ranker.has_breakout_structure(
+                    has_bos, _bk_lvl, _bk_dir, _bk_type = ranker.has_breakout_structure(
                         market, bar_history, market.price,
                         history_15m=bar_history_15m or None,
                     )

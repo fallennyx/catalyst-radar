@@ -126,7 +126,7 @@ def _hist_with_4h_pivot_and_breakout(
 def test_has_breakout_structure_long_break_uses_4h_pivot():
     bars = _hist_with_4h_pivot_and_breakout()
     market = Market(ticker="X", asset_class="crypto_t1")
-    broke, direction, level = ranker.has_breakout_structure(
+    broke, direction, level, _ = ranker.has_breakout_structure(
         market, bars, current_price=103.0,
     )
     assert broke is True
@@ -134,12 +134,13 @@ def test_has_breakout_structure_long_break_uses_4h_pivot():
     assert level == 100.0  # the 4h reference
 
 
-def test_has_breakout_structure_no_break_when_4h_history_too_short():
-    """Only 100 hours = 25 4h-bars — below the 33-bar minimum."""
+def test_has_breakout_structure_no_break_when_4h_history_too_short(monkeypatch):
+    """4h path requires 33+ 4h-bars; with 1h path disabled, 100h is insufficient."""
+    monkeypatch.setattr(config, "BOS_1H_ENABLED", False)
     bars = [_bar(ts=i * 3600, high=92.0, low=90.0) for i in range(100)]
     bars[-1] = _bar(ts=99 * 3600, open_=90.0, high=110.0, low=88.0, close=109.0)
     market = Market(ticker="X", asset_class="crypto_t1")
-    broke, _, _ = ranker.has_breakout_structure(market, bars, current_price=109.0)
+    broke, _, _, _ = ranker.has_breakout_structure(market, bars, current_price=109.0)
     assert broke is False
 
 
@@ -155,7 +156,7 @@ def test_has_breakout_structure_short_break_uses_4h_pivot_low():
     # in-progress bar: wide range, price below 100
     bars[-1] = _bar(ts=199 * 3600, open_=158.0, high=159.0, low=95.0, close=97.0)
     market = Market(ticker="X", asset_class="crypto_t1")
-    broke, direction, level = ranker.has_breakout_structure(
+    broke, direction, level, _ = ranker.has_breakout_structure(
         market, bars, current_price=97.0,
     )
     assert broke is True
@@ -169,7 +170,7 @@ def test_has_breakout_structure_drops_when_1h_range_doesnt_expand():
         in_progress_high=103.0, in_progress_low=102.5,  # tiny range 0.5
     )
     market = Market(ticker="X", asset_class="crypto_t1")
-    broke, _, _ = ranker.has_breakout_structure(market, bars, current_price=103.0)
+    broke, _, _, _ = ranker.has_breakout_structure(market, bars, current_price=103.0)
     assert broke is False
 
 
@@ -222,7 +223,7 @@ def test_volume_gate_blocks_breakout_on_dead_volume(monkeypatch):
         median_volume=1000.0,
     )
     market = Market(ticker="X", asset_class="crypto_t1")
-    broke, _, _ = ranker.has_breakout_structure(market, bars, current_price=103.0)
+    broke, _, _, _ = ranker.has_breakout_structure(market, bars, current_price=103.0)
     assert broke is False
 
 
@@ -237,7 +238,7 @@ def test_volume_gate_passes_when_volume_expands(monkeypatch):
         median_volume=1000.0,
     )
     market = Market(ticker="X", asset_class="crypto_t1")
-    broke, direction, _ = ranker.has_breakout_structure(market, bars, current_price=103.0)
+    broke, direction, _, _ = ranker.has_breakout_structure(market, bars, current_price=103.0)
     assert broke is True
     assert direction == "long"
 
@@ -248,7 +249,7 @@ def test_volume_gate_no_block_when_volumes_unavailable(monkeypatch):
     monkeypatch.setattr(config, "REQUIRE_HTF_TREND_ALIGNMENT", False)
     bars = _hist_with_4h_pivot_and_breakout()  # zero volumes throughout
     market = Market(ticker="X", asset_class="crypto_t1")
-    broke, _, _ = ranker.has_breakout_structure(market, bars, current_price=103.0)
+    broke, _, _, _ = ranker.has_breakout_structure(market, bars, current_price=103.0)
     assert broke is True
 
 
@@ -273,7 +274,7 @@ def test_htf_trend_blocks_long_against_downtrend(monkeypatch):
     bars[-1] = _vol_bar(ts=199 * 3600, open_=99.0,
                         high=103.0, low=98.0, close=103.0, volume=0.0)
     market = Market(ticker="X", asset_class="crypto_t1")
-    broke, _, _ = ranker.has_breakout_structure(market, bars, current_price=103.0)
+    broke, _, _, _ = ranker.has_breakout_structure(market, bars, current_price=103.0)
     assert broke is False
 
 
@@ -283,7 +284,7 @@ def test_htf_trend_passes_long_with_uptrend(monkeypatch):
     monkeypatch.setattr(config, "REQUIRE_HTF_TREND_ALIGNMENT", True)
     bars = _hist_with_4h_pivot_and_breakout()  # closes ~91, current ~103 → above
     market = Market(ticker="X", asset_class="crypto_t1")
-    broke, direction, _ = ranker.has_breakout_structure(market, bars, current_price=103.0)
+    broke, direction, _, _ = ranker.has_breakout_structure(market, bars, current_price=103.0)
     assert broke is True and direction == "long"
 
 

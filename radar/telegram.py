@@ -317,10 +317,12 @@ def send_bos_alert(
     if risks:
         risks_block = "\n\n*Risks:*\n" + "\n".join(f"• {_md_escape(r)}" for r in risks[:3])
 
+    structure_type = metadata.get("structure_type") or "4h"
+    structure_tag = " `[1h]`" if structure_type == "1h" else ""
     body = (
         f"{direction_emoji} *RADAR — {ticker}* {pct_24h:+.2f}%{promoted_tag}{badges_block}\n"
         f"{asset_class}{_session_tag(market)}\n\n"
-        f"*BOS confirmed:* {direction.upper()} above ${_fmt_price(breakout_level)}\n"
+        f"*BOS confirmed{structure_tag}:* {direction.upper()} above ${_fmt_price(breakout_level)}\n"
         f"*Catalyst:* {_md_escape(primary)}\n"
         f"*Type:* {_md_escape(catalyst_type)} · *Conviction:* {conviction*100:.0f}/100{quality_line}\n"
         f"*Horizon:* {_md_escape(horizon)}{entry_line}\n\n"

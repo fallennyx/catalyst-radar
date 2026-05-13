@@ -192,7 +192,16 @@ BACKFILL_15M_GAP_THRESHOLD_SEC = 900  # skip ticker if last 15m bar < this old
 # fly (UTC-aligned: 00, 04, 08, 12, 16, 20).
 SWING_LOOKBACK_4H_BARS = 30         # 30 4h-bars = 5 days of structure
 SWING_MIN_AGE_4H_BARS = 1           # skip the in-progress 4h bar
-SWING_MIN_BARS_VALIDATION_4H = 2    # pivot must hold for >=2 4h bars (8h validation)
+SWING_MIN_BARS_VALIDATION_4H = 1    # pivot must hold for >=1 4h bar (4h validation; was 2)
+
+# 1h frame BOS — early detection path. Fires when price breaks a recent 1h
+# pivot with lower range-expansion confirmation. Lower conviction than 4h; higher
+# frequency. The 4h path always takes priority when it fires first.
+BOS_1H_ENABLED = True
+SWING_LOOKBACK_1H_BOS_BARS = 24       # 24 1h bars = 1 day of 1h structure
+SWING_MIN_AGE_1H_BOS_BARS = 1         # skip the in-progress 1h bar
+SWING_MIN_BARS_VALIDATION_1H = 2      # pivot must hold for >=2 1h bars (2h validation)
+RANGE_EXPANSION_MULTIPLIER_1H_ENTRY = 1.5  # lower threshold for earlier detection
 
 # How much 1h history to fetch for BOS evaluation. Must be wide enough to
 # synthesize SWING_LOOKBACK_4H_BARS + age + validation 4h bars (with a safety

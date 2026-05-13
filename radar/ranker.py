@@ -550,30 +550,32 @@ def has_breakout_structure(
     history: list,
     current_price: float | None = None,
     history_15m: list | None = None,
-) -> tuple[bool, str | None, float | None]:
-    """Multi-timeframe BOS detection with parallel 1h+15m confirmation gates.
+) -> tuple[bool, str | None, float | None, str | None]:
+    """Multi-timeframe BOS detection: 4h structural path + 1h early-detection path.
 
-    A break is confirmed when:
-      1. **Either** the in-progress **1h** bar's range exceeds
-         RANGE_EXPANSION_MULTIPLIER × median 1h range, **OR** the in-progress
-         **15m** bar's range exceeds RANGE_EXPANSION_MULTIPLIER_15M × median
-         15m range. Whichever clears first wins — this shrinks alert latency
-         from ~10–30 min (1h-only) to ~1–5 min on most real impulses.
-      2. Live price has crossed a 4h structural swing high (long) or swing
-         low (short). 4h bars are synthesized UTC-aligned from the 1h history.
+    Returns ``(broke_structure, direction, breakout_level, structure_type)`` where
+    ``structure_type`` is ``"4h"`` (high-conviction 4h pivot break) or ``"1h"``
+    (early-detection 1h pivot break). ``breakout_level`` is the reference pivot.
 
-    Returns ``(broke_structure, direction, breakout_level)`` where
-    ``breakout_level`` is the **4h** swing reference. ``direction`` is
-    ``"long"`` for a swing-high break, ``"short"`` for a swing-low break.
+    Priority order: 4h path fires first when it can; 1h path is the fallback
+    (lower confirmation threshold, smaller pivot, fires mid-candle or sooner).
+
+    4h path requirements (high conviction):
+      - 1h range ≥ RANGE_EXPANSION_MULTIPLIER (2.0×) OR 15m range ≥ 2.5×
+      - Price crosses a UTC-aligned 4h swing pivot
+
+    1h path requirements (early detection, BOS_1H_ENABLED must be True):
+      - 1h range ≥ RANGE_EXPANSION_MULTIPLIER_1H_ENTRY (1.5×) OR 15m range ≥ 2.5×
+      - Price crosses a 1h swing pivot (24h lookback, 2h validation)
     """
     if not history:
-        return (False, None, None)
+        return (False, None, None, None)
     if current_price is None:
         current_price = float(history[-1].close or 0.0)
     else:
         current_price = float(current_price)
 
-    # ---- Confirmation: 1h OR 15m range expansion ----
+    # ---- Range confirmation pre-checks ----
     confirmed_1h = _confirm_range_expansion(
         history,
         multiplier=config.RANGE_EXPANSION_MULTIPLIER,
@@ -586,46 +588,92 @@ def has_breakout_structure(
             multiplier=config.RANGE_EXPANSION_MULTIPLIER_15M,
             lookback_window=config.SWING_LOOKBACK_15M_BARS,
         )
-    if not (confirmed_1h or confirmed_15m):
-        return (False, None, None)
 
-    # ---- 4h structural break ----
-    bars_4h = synthesize_4h_bars(history)
-    needed_4h = (
-        config.SWING_LOOKBACK_4H_BARS
-        + config.SWING_MIN_AGE_4H_BARS
-        + config.SWING_MIN_BARS_VALIDATION_4H
-    )
-    if len(bars_4h) < needed_4h:
-        return (False, None, None)
+    # ---- Priority 1: 4h structural break (high conviction) ----
+    if confirmed_1h or confirmed_15m:
+        bars_4h = synthesize_4h_bars(history)
+        needed_4h = (
+            config.SWING_LOOKBACK_4H_BARS
+            + config.SWING_MIN_AGE_4H_BARS
+            + config.SWING_MIN_BARS_VALIDATION_4H
+        )
+        if len(bars_4h) >= needed_4h:
+            swing_high_4h = find_swing_high(
+                bars_4h,
+                lookback_hours=config.SWING_LOOKBACK_4H_BARS,
+                min_age_hours=config.SWING_MIN_AGE_4H_BARS,
+                min_bars_validation=config.SWING_MIN_BARS_VALIDATION_4H,
+            )
+            if swing_high_4h and current_price > swing_high_4h.price:
+                if config.REQUIRE_HTF_TREND_ALIGNMENT and not htf_trend_aligned(
+                    history, "long", config.HTF_TREND_LOOKBACK_HOURS,
+                ):
+                    pass  # fall through to 1h path
+                else:
+                    return (True, "long", swing_high_4h.price, "4h")
 
-    swing_high_4h = find_swing_high(
-        bars_4h,
-        lookback_hours=config.SWING_LOOKBACK_4H_BARS,
-        min_age_hours=config.SWING_MIN_AGE_4H_BARS,
-        min_bars_validation=config.SWING_MIN_BARS_VALIDATION_4H,
+            swing_low_4h = find_swing_low(
+                bars_4h,
+                lookback_hours=config.SWING_LOOKBACK_4H_BARS,
+                min_age_hours=config.SWING_MIN_AGE_4H_BARS,
+                min_bars_validation=config.SWING_MIN_BARS_VALIDATION_4H,
+            )
+            if swing_low_4h and current_price < swing_low_4h.price:
+                if config.REQUIRE_HTF_TREND_ALIGNMENT and not htf_trend_aligned(
+                    history, "short", config.HTF_TREND_LOOKBACK_HOURS,
+                ):
+                    pass  # fall through to 1h path
+                else:
+                    return (True, "short", swing_low_4h.price, "4h")
+
+    # ---- Priority 2: 1h structural break (early detection) ----
+    if not config.BOS_1H_ENABLED:
+        return (False, None, None, None)
+
+    # 1h path uses a lower range expansion threshold (1.5×) so it fires earlier.
+    confirmed_1h_entry = confirmed_1h or _confirm_range_expansion(
+        history,
+        multiplier=config.RANGE_EXPANSION_MULTIPLIER_1H_ENTRY,
+        lookback_window=config.SWING_LOOKBACK_1H_BOS_BARS,
     )
-    if swing_high_4h and current_price > swing_high_4h.price:
+    if not (confirmed_1h_entry or confirmed_15m):
+        return (False, None, None, None)
+
+    needed_1h = (
+        config.SWING_LOOKBACK_1H_BOS_BARS
+        + config.SWING_MIN_AGE_1H_BOS_BARS
+        + config.SWING_MIN_BARS_VALIDATION_1H
+    )
+    if len(history) < needed_1h:
+        return (False, None, None, None)
+
+    swing_high_1h = find_swing_high(
+        history,
+        lookback_hours=config.SWING_LOOKBACK_1H_BOS_BARS,
+        min_age_hours=config.SWING_MIN_AGE_1H_BOS_BARS,
+        min_bars_validation=config.SWING_MIN_BARS_VALIDATION_1H,
+    )
+    if swing_high_1h and current_price > swing_high_1h.price:
         if config.REQUIRE_HTF_TREND_ALIGNMENT and not htf_trend_aligned(
             history, "long", config.HTF_TREND_LOOKBACK_HOURS,
         ):
-            return (False, None, None)
-        return (True, "long", swing_high_4h.price)
+            return (False, None, None, None)
+        return (True, "long", swing_high_1h.price, "1h")
 
-    swing_low_4h = find_swing_low(
-        bars_4h,
-        lookback_hours=config.SWING_LOOKBACK_4H_BARS,
-        min_age_hours=config.SWING_MIN_AGE_4H_BARS,
-        min_bars_validation=config.SWING_MIN_BARS_VALIDATION_4H,
+    swing_low_1h = find_swing_low(
+        history,
+        lookback_hours=config.SWING_LOOKBACK_1H_BOS_BARS,
+        min_age_hours=config.SWING_MIN_AGE_1H_BOS_BARS,
+        min_bars_validation=config.SWING_MIN_BARS_VALIDATION_1H,
     )
-    if swing_low_4h and current_price < swing_low_4h.price:
+    if swing_low_1h and current_price < swing_low_1h.price:
         if config.REQUIRE_HTF_TREND_ALIGNMENT and not htf_trend_aligned(
             history, "short", config.HTF_TREND_LOOKBACK_HOURS,
         ):
-            return (False, None, None)
-        return (True, "short", swing_low_4h.price)
+            return (False, None, None, None)
+        return (True, "short", swing_low_1h.price, "1h")
 
-    return (False, None, None)
+    return (False, None, None, None)
 
 
 def precompute_references_for_watchlist(

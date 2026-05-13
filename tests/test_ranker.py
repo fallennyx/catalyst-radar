@@ -217,7 +217,7 @@ def test_has_breakout_structure_long_break_with_range_expansion():
     # in-progress 1h bar: wide range (2.5x median 1h ~2.0 = 5.0), price > 100
     bars[-1] = _bar(ts=199 * 3600, high=103.0, low=98.0, close=102.5)
     market = Market(ticker="TEST", asset_class="crypto_t1")
-    broke, direction, level = ranker.has_breakout_structure(
+    broke, direction, level, _ = ranker.has_breakout_structure(
         market, bars, current_price=103.0
     )
     assert broke is True
@@ -230,7 +230,7 @@ def test_has_breakout_structure_long_break_without_range_expansion():
     bars = _bars_with_4h_pivot_high()
     bars[-1] = _bar(ts=199 * 3600, high=103.0, low=102.5, close=102.8)  # range 0.5
     market = Market(ticker="TEST", asset_class="crypto_t1")
-    broke, direction, level = ranker.has_breakout_structure(
+    broke, direction, level, _ = ranker.has_breakout_structure(
         market, bars, current_price=103.0
     )
     assert broke is False
@@ -244,7 +244,7 @@ def test_has_breakout_structure_uses_live_price_over_close():
     # in-progress 1h bar: wide range, but bar.close still at 99
     bars[-1] = _bar(ts=199 * 3600, high=99.5, low=94.0, close=99.0)
     market = Market(ticker="TEST", asset_class="crypto_t1")
-    broke, direction, level = ranker.has_breakout_structure(
+    broke, direction, level, _ = ranker.has_breakout_structure(
         market, bars, current_price=103.0
     )
     assert broke is True
@@ -270,12 +270,12 @@ def test_has_breakout_structure_15m_parallel_fires_when_1h_alone_would_not():
 
     market = Market(ticker="TEST", asset_class="crypto_t1")
     # Without history_15m: should NOT fire (1h gate too narrow).
-    broke_1h_only, _, _ = ranker.has_breakout_structure(
+    broke_1h_only, _, _, _ = ranker.has_breakout_structure(
         market, bars_1h, current_price=103.0,
     )
     assert broke_1h_only is False, "1h gate should not clear on a 0.5-range bar"
     # With history_15m: SHOULD fire on the 15m gate.
-    broke, direction, level = ranker.has_breakout_structure(
+    broke, direction, level, _ = ranker.has_breakout_structure(
         market, bars_1h, current_price=103.0, history_15m=bars_15m,
     )
     assert broke is True
@@ -307,15 +307,35 @@ def test_is_breakout_near_poc():
     assert ranker.is_breakout_near_poc(100.0, None) is False
 
 
-def test_has_breakout_structure_short_history_returns_no_break():
-    """Without enough 1h history to synthesize 33+ 4h bars, no BOS can fire."""
+def test_has_breakout_structure_short_history_4h_only_returns_no_break(monkeypatch):
+    """4h path needs 33+ 4h-bars; with 1h disabled, 60 bars is insufficient."""
+    monkeypatch.setattr(config, "BOS_1H_ENABLED", False)
     bars: list[Bar] = []
     for i in range(60):  # only 15 4h-bars worth
         bars.append(_bar(ts=i * 3600, high=92.0, low=90.0))
     bars[-1] = _bar(ts=59 * 3600, high=120.0, low=89.0, close=119.0)
     market = Market(ticker="TEST", asset_class="crypto_t1")
-    broke, _, _ = ranker.has_breakout_structure(market, bars, current_price=120.0)
+    broke, _, _, _ = ranker.has_breakout_structure(market, bars, current_price=120.0)
     assert broke is False
+
+
+def test_has_breakout_structure_1h_path_fires_with_short_history(monkeypatch):
+    """1h path only needs 27+ bars; fires mid-candle before 4h history accumulates."""
+    monkeypatch.setattr(config, "REQUIRE_HTF_TREND_ALIGNMENT", False)
+    monkeypatch.setattr(config, "REQUIRE_VOLUME_CONFIRMATION", False)
+    bars: list[Bar] = []
+    for i in range(60):  # ample for 1h path (needs 27)
+        bars.append(_bar(ts=i * 3600, high=92.0, low=90.0))
+    # Wide-range impulse bar breaks above the prior 1h swing high
+    bars[-1] = _bar(ts=59 * 3600, high=120.0, low=89.0, close=119.0)
+    market = Market(ticker="TEST", asset_class="crypto_t1")
+    broke, direction, level, structure_type = ranker.has_breakout_structure(
+        market, bars, current_price=120.0,
+    )
+    assert broke is True
+    assert direction == "long"
+    assert level is not None
+    assert structure_type == "1h"
 
 
 def test_check_breakout_against_stored_references_respects_direction_bias():
