@@ -146,9 +146,11 @@ def test_bos_not_confirmed_low_score_drops(tmp_db):
     assert storage.get_watchlist_entry("SOL") is None
 
 
-def test_bos_confirmed_direction_conflict_passes_with_metadata_flag(tmp_db):
-    """v3: direction conflict no longer suppresses. The alert fires; the
-    conflict is flagged in metadata so the alert body can warn the user."""
+def test_bos_confirmed_direction_conflict_still_emits(tmp_db):
+    """v3.2: direction conflict is no longer suppression's concern. The alert
+    fires unconditionally on BOS; the direction_adjudicator (downstream) is
+    the authority that decides what direction the user actually sees.
+    Suppression now just passes through with structure_direction set."""
     market = _market("AMD", asset_class="equity", price=370.0)
     alert = _alert("AMD", asset_class="equity", direction="short")
     history = _bos_history_long_break(price_above=370.0)
@@ -156,8 +158,8 @@ def test_bos_confirmed_direction_conflict_passes_with_metadata_flag(tmp_db):
     decision, reason, metadata = suppression.evaluate(market, alert, history)
     assert decision == "EMIT"
     assert reason == "ok"
-    assert metadata.get("direction_conflict") is True
-    assert metadata.get("classifier_direction") == "short"
+    # Vestigial flag no longer set — adjudicator handles disagreement now.
+    assert "direction_conflict" not in metadata
     assert metadata.get("structure_direction") == "long"
 
 

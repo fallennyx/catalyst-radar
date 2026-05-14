@@ -82,6 +82,18 @@ def _seed_recent_bars(ticker: str = "AMD", current_high: float = 372.0,
 # tests
 # ============================================================================
 
+@pytest.fixture(autouse=True)
+def _isolate_tier2_from_adjudicator(monkeypatch):
+    """Tier 2 promotion path now calls the direction adjudicator, which would
+    fetch news + hit Gemini in production. Stub both to keep these tests
+    offline and deterministic. Individual tests can opt out by overriding."""
+    monkeypatch.setattr(config, "DIR_ADJUDICATE_TIER_2", False)
+    # Belt and suspenders — if a test re-enables DIR_ADJUDICATE_TIER_2,
+    # stop the network calls from happening.
+    monkeypatch.setattr(
+        radar_main.catalysts, "fetch_for_market", lambda *a, **kw: [],
+    )
+
 def test_tier2_polls_active_watchlist_only(tmp_db):
     _seed_watchlist_entry("AMD")
     _seed_watchlist_entry("NVDA")

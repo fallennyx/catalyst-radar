@@ -1,9 +1,10 @@
-"""Stage 2 reasoner (radar/predictor.py) tests.
+"""Predictor (radar/predictor.py) tests.
 
 We never touch the real Gemini API — the HTTP call is monkey-patched. These
 tests pin the request shape (model, tool schema, thinking budget), the
-response parser (verdict clamps, horizon enum), and the failure modes
-(returns None on infrastructure error so caller treats as ALERT_NOW).
+response parser (direction enum, verdict clamps, horizon enum), and the
+failure modes (returns None on infrastructure error so caller can fall back
+to the structural direction).
 """
 
 from __future__ import annotations
@@ -24,13 +25,15 @@ def _market():
     )
 
 
-def _plan():
-    return SimpleNamespace(
-        direction="long", entry=1.7880, stop=1.7106,
-        tp1=1.9041, tp2=2.0203, risk_per_unit=0.0774,
-        r_multiple_tp1=1.5, r_multiple_tp2=3.0,
-        trail_atr=0.0494,
-    )
+def _bundle(**overrides) -> dict:
+    base = {
+        "structure_direction": "long",
+        "structure_type": "4h",
+        "breakout_level": "1.710000",
+        "current_price": "1.788000",
+    }
+    base.update(overrides)
+    return base
 
 
 def _bars(n: int = 60):
@@ -44,7 +47,7 @@ def _bars(n: int = 60):
     ]
 
 
-def _stub_response(args: dict, name: str = "analyze_setup"):
+def _stub_response(args: dict, name: str = "decide_direction"):
     return {
         "candidates": [
             {"content": {"parts": [{"functionCall": {"name": name, "args": args}}]}},
@@ -53,7 +56,6 @@ def _stub_response(args: dict, name: str = "analyze_setup"):
 
 
 def _patch_post(monkeypatch, response_json: dict, status: int = 200):
-    """Replace requests.post inside the predictor module."""
     fake_resp = MagicMock()
     fake_resp.status_code = status
     fake_resp.json.return_value = response_json
@@ -62,29 +64,15 @@ def _patch_post(monkeypatch, response_json: dict, status: int = 200):
     fake_requests = MagicMock()
     fake_requests.post.return_value = fake_resp
 
-    # The predictor module imports `requests` lazily inside `analyze`. We patch
-    # sys.modules so the local import inside the function picks up our stub.
     import sys
     monkeypatch.setitem(sys.modules, "requests", fake_requests)
     monkeypatch.setenv("GEMINI_API_KEY", "test-key")
     return fake_requests
 
 
-def test_predictor_returns_none_when_disabled(monkeypatch):
-    monkeypatch.setattr(config, "STAGE2_ENABLED", False)
-    assert predictor.analyze(_market(), None, _plan(), {}, _bars(), [], []) is None
-
-
-def test_predictor_returns_none_without_api_key(monkeypatch):
-    monkeypatch.setattr(config, "STAGE2_ENABLED", True)
-    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
-    monkeypatch.delenv("GOOGLE_API_KEY", raising=False)
-    assert predictor.analyze(_market(), None, _plan(), {}, _bars(), [], []) is None
-
-
-def test_predictor_parses_valid_response(monkeypatch):
-    monkeypatch.setattr(config, "STAGE2_ENABLED", True)
-    args = {
+def _good_args(**overrides):
+    base = {
+        "final_direction": "long",
         "verdict": "ALERT_NOW",
         "direction_confidence": 0.82,
         "setup_quality": 0.78,
@@ -95,47 +83,80 @@ def test_predictor_parses_valid_response(monkeypatch):
         "entry_guidance": "Pullback to $1.78",
         "risks": ["BTC could reverse", "ETF flows could cool", "Token unlock in 5d"],
     }
-    _patch_post(monkeypatch, _stub_response(args))
-    result = predictor.analyze(_market(), None, _plan(), {"breakout_level": 1.71}, _bars(), [], [])
+    base.update(overrides)
+    return base
+
+
+def test_predictor_returns_none_when_both_flags_off(monkeypatch):
+    monkeypatch.setattr(config, "STAGE2_ENABLED", False)
+    monkeypatch.setattr(config, "DIRECTION_ADJUDICATOR_ENABLED", False)
+    assert predictor.analyze(_market(), None, _bundle(), _bars(), [], [], []) is None
+
+
+def test_predictor_returns_none_without_api_key(monkeypatch):
+    monkeypatch.setattr(config, "STAGE2_ENABLED", True)
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+    monkeypatch.delenv("GOOGLE_API_KEY", raising=False)
+    assert predictor.analyze(_market(), None, _bundle(), _bars(), [], [], []) is None
+
+
+def test_predictor_parses_valid_long_response(monkeypatch):
+    monkeypatch.setattr(config, "STAGE2_ENABLED", True)
+    _patch_post(monkeypatch, _stub_response(_good_args()))
+    result = predictor.analyze(_market(), None, _bundle(), _bars(), [], [], [])
     assert result is not None
-    assert result.verdict == "ALERT_NOW"
+    assert result.final_direction == "long"
     assert result.direction_confidence == 0.82
+    assert result.verdict == "ALERT_NOW"
     assert result.expected_horizon == "1-3_days"
-    assert result.expected_r_multiple == 3.0
     assert len(result.risks) == 3
 
 
-def test_predictor_clamps_invalid_verdict_to_alert_now(monkeypatch):
+def test_predictor_accepts_no_trade(monkeypatch):
     monkeypatch.setattr(config, "STAGE2_ENABLED", True)
-    args = {
-        "verdict": "MAYBE",          # not in enum
-        "direction_confidence": 0.5,
-        "setup_quality": 0.5,
-        "thesis": "x",
-        "kill_signal": "y",
-        "expected_horizon": "intraday",
-        "expected_r_multiple": 2.0,
-        "entry_guidance": "market",
-    }
-    _patch_post(monkeypatch, _stub_response(args))
-    r = predictor.analyze(_market(), None, _plan(), {}, _bars(), [], [])
+    monkeypatch.setattr(config, "DIR_ALLOW_NO_TRADE", True)
+    _patch_post(monkeypatch, _stub_response(_good_args(final_direction="no_trade")))
+    r = predictor.analyze(_market(), None, _bundle(), _bars(), [], [], [])
     assert r is not None
-    assert r.verdict == "ALERT_NOW"
+    assert r.final_direction == "no_trade"
+
+
+def test_predictor_accepts_flip_when_allowed(monkeypatch):
+    monkeypatch.setattr(config, "STAGE2_ENABLED", True)
+    monkeypatch.setattr(config, "DIR_ALLOW_FLIP", True)
+    _patch_post(monkeypatch, _stub_response(_good_args(final_direction="short")))
+    r = predictor.analyze(_market(), None, _bundle(structure_direction="long"),
+                          _bars(), [], [], [])
+    assert r is not None
+    assert r.final_direction == "short"
+
+
+def test_predictor_blocks_flip_when_disabled(monkeypatch):
+    monkeypatch.setattr(config, "STAGE2_ENABLED", True)
+    monkeypatch.setattr(config, "DIR_ALLOW_FLIP", False)
+    _patch_post(monkeypatch, _stub_response(_good_args(final_direction="short")))
+    r = predictor.analyze(_market(), None, _bundle(structure_direction="long"),
+                          _bars(), [], [], [])
+    assert r is not None
+    # Flip blocked → falls back to structural direction
+    assert r.final_direction == "long"
+
+
+def test_predictor_falls_back_to_structural_on_garbage_direction(monkeypatch):
+    monkeypatch.setattr(config, "STAGE2_ENABLED", True)
+    _patch_post(monkeypatch, _stub_response(_good_args(final_direction="moonshot")))
+    r = predictor.analyze(_market(), None, _bundle(structure_direction="short"),
+                          _bars(), [], [], [])
+    assert r is not None
+    assert r.final_direction == "short"
 
 
 def test_predictor_clamps_confidence_to_unit_range(monkeypatch):
     monkeypatch.setattr(config, "STAGE2_ENABLED", True)
-    args = {
-        "verdict": "ALERT_NOW",
-        "direction_confidence": 1.7,    # out of [0,1]
-        "setup_quality": -0.4,
-        "thesis": "x", "kill_signal": "y",
-        "expected_horizon": "intraday",
-        "expected_r_multiple": 1.5,
-        "entry_guidance": "market",
-    }
-    _patch_post(monkeypatch, _stub_response(args))
-    r = predictor.analyze(_market(), None, _plan(), {}, _bars(), [], [])
+    _patch_post(monkeypatch, _stub_response(
+        _good_args(direction_confidence=1.7, setup_quality=-0.4)
+    ))
+    r = predictor.analyze(_market(), None, _bundle(), _bars(), [], [], [])
     assert r is not None
     assert r.direction_confidence == 1.0
     assert r.setup_quality == 0.0
@@ -144,44 +165,32 @@ def test_predictor_clamps_confidence_to_unit_range(monkeypatch):
 def test_predictor_returns_none_on_http_error(monkeypatch):
     monkeypatch.setattr(config, "STAGE2_ENABLED", True)
     _patch_post(monkeypatch, {}, status=500)
-    assert predictor.analyze(_market(), None, _plan(), {}, _bars(), [], []) is None
+    assert predictor.analyze(_market(), None, _bundle(), _bars(), [], [], []) is None
 
 
 def test_predictor_returns_none_when_no_function_call(monkeypatch):
     monkeypatch.setattr(config, "STAGE2_ENABLED", True)
-    # Response has candidates but no functionCall
-    _patch_post(monkeypatch, {"candidates": [{"content": {"parts": [{"text": "hello"}]}}]})
-    assert predictor.analyze(_market(), None, _plan(), {}, _bars(), [], []) is None
+    _patch_post(monkeypatch, {"candidates": [{"content": {"parts": [{"text": "hi"}]}}]})
+    assert predictor.analyze(_market(), None, _bundle(), _bars(), [], [], []) is None
 
 
-def test_predictor_request_includes_thinking_budget(monkeypatch):
-    """Stage 2 reasoning hinges on Gemini's thinking budget — verify it's sent."""
+def test_predictor_request_pins_tool_schema(monkeypatch):
     monkeypatch.setattr(config, "STAGE2_ENABLED", True)
-    args = {
-        "verdict": "ALERT_NOW", "direction_confidence": 0.7, "setup_quality": 0.7,
-        "thesis": "x", "kill_signal": "y", "expected_horizon": "intraday",
-        "expected_r_multiple": 2.0, "entry_guidance": "market",
-    }
-    fake_requests = _patch_post(monkeypatch, _stub_response(args))
-    predictor.analyze(_market(), None, _plan(), {}, _bars(), [], [])
-    _, kwargs = fake_requests.post.call_args
+    fake = _patch_post(monkeypatch, _stub_response(_good_args()))
+    predictor.analyze(_market(), None, _bundle(), _bars(), [], [], [])
+    _, kwargs = fake.post.call_args
     body = kwargs["json"]
     assert body["generationConfig"]["thinkingConfig"]["thinkingBudget"] == config.STAGE2_THINKING_BUDGET
     assert body["toolConfig"]["functionCallingConfig"]["mode"] == "ANY"
-    assert body["toolConfig"]["functionCallingConfig"]["allowedFunctionNames"] == ["analyze_setup"]
+    assert body["toolConfig"]["functionCallingConfig"]["allowedFunctionNames"] == ["decide_direction"]
 
 
 def test_predictor_truncates_long_thesis(monkeypatch):
     monkeypatch.setattr(config, "STAGE2_ENABLED", True)
-    long_thesis = "x" * 5000
-    args = {
-        "verdict": "ALERT_NOW", "direction_confidence": 0.7, "setup_quality": 0.7,
-        "thesis": long_thesis, "kill_signal": "y" * 1000,
-        "expected_horizon": "intraday",
-        "expected_r_multiple": 2.0, "entry_guidance": "z" * 500,
-    }
-    _patch_post(monkeypatch, _stub_response(args))
-    r = predictor.analyze(_market(), None, _plan(), {}, _bars(), [], [])
+    _patch_post(monkeypatch, _stub_response(
+        _good_args(thesis="x" * 5000, kill_signal="y" * 1000, entry_guidance="z" * 500)
+    ))
+    r = predictor.analyze(_market(), None, _bundle(), _bars(), [], [], [])
     assert r is not None
     assert len(r.thesis) <= 1500
     assert len(r.kill_signal) <= 500

@@ -35,6 +35,24 @@ def _md_escape(s: str) -> str:
 
 _ARROW = {"long": "🟢 LONG", "short": "🔴 SHORT", "neutral": "⚪ NEUTRAL"}
 
+# Conviction-tier rendering — driven by direction_adjudicator.AdjudicatedDirection
+_TIER_BADGE = {
+    ("STRONG", "long"):     "🟢🟢🟢 *STRONG LONG*",
+    ("STRONG", "short"):    "🔴🔴🔴 *STRONG SHORT*",
+    ("OK", "long"):         "🟢 *LONG*",
+    ("OK", "short"):        "🔴 *SHORT*",
+    ("TENTATIVE", "long"):  "🟡 *LONG (tentative)*",
+    ("TENTATIVE", "short"): "🟠 *SHORT (tentative)*",
+}
+
+
+def _render_tier_badge(tier: str, direction: str) -> str:
+    """Build the headline direction badge from the adjudicator's tier + direction."""
+    direction = (direction or "").lower()
+    if tier == "NO_TRADE" or direction == "no_trade":
+        return "⏸ *NO TRADE — direction unclear*"
+    return _TIER_BADGE.get((tier, direction), f"*{(direction or '?').upper()}*")
+
 
 def _format_alert(alert: Any, classifier: Any | None) -> str:
     """Build the Markdown payload sent to Telegram."""
@@ -231,105 +249,64 @@ def send_bos_alert(
     as a "Plan:" block. Computed by the caller; passing ``None`` falls back
     to the legacy alert-without-plan format.
     """
-    breakout_level = metadata.get("breakout_level")
-    promoted_tag = ""
-    if metadata.get("promoted_from_watchlist"):
-        promoted_tag = f" \\[promoted: {metadata.get('hours_on_watchlist', 0)}h on watchlist]"
-
-    direction = (getattr(classifier_result, "direction", "neutral") or "neutral").lower()
-    direction_emoji = "🔥" if direction == "long" else ("🩸" if direction == "short" else "⚪")
-
-    primary = (
-        getattr(classifier_result, "primary_catalyst", None)
-        or getattr(classifier_result, "summary", None)
-        or "(no catalyst description)"
-    )
-    catalyst_type = getattr(classifier_result, "catalyst_type", "?")
-
-    # Stage 2 predictor takes precedence on prose fields when available. It
-    # has full context (price history, indicators, BTC, news, classifier output)
-    # while the classifier only sees news. If stage 2 returned None
-    # (infrastructure failure / disabled / no key), fall back cleanly to the
-    # classifier's defaults.
-    pred = metadata.get("predictor_result") if isinstance(metadata, dict) else None
-
-    if pred is not None:
-        conviction = float(getattr(pred, "direction_confidence", 0.0) or 0.0)
-        horizon = getattr(pred, "expected_horizon", "intraday")
-        thesis = getattr(pred, "thesis", "") or ""
-        kill = getattr(pred, "kill_signal", "") or "—"
-        entry_guidance = getattr(pred, "entry_guidance", "") or ""
-        setup_quality = float(getattr(pred, "setup_quality", 0.0) or 0.0)
-        risks = list(getattr(pred, "risks", []) or [])
+    # ---- Adjudicated direction is the source of truth (v3.2) ----
+    adj = metadata.get("adjudicated") if isinstance(metadata, dict) else None
+    if adj is not None:
+        direction = (getattr(adj, "direction", "") or "").lower()
+        tier = getattr(adj, "conviction_tier", "OK")
+        flipped = bool(getattr(adj, "flipped", False))
+        fallback = bool(getattr(adj, "fallback", False))
     else:
-        conviction = float(getattr(classifier_result, "conviction", None)
-                           or getattr(classifier_result, "confidence", 0.0) or 0.0)
-        horizon = getattr(classifier_result, "horizon", "unknown")
+        direction = (getattr(classifier_result, "direction", "neutral") or "neutral").lower()
+        tier = "OK"
+        flipped = False
+        fallback = False
+    tier_badge = _render_tier_badge(tier, direction)
+
+    # ---- Thesis: prefer the predictor's reasoning; fall back to classifier ----
+    pred = metadata.get("predictor_result") if isinstance(metadata, dict) else None
+    if pred is not None:
+        thesis = getattr(pred, "thesis", "") or ""
+    else:
         thesis = (
             getattr(classifier_result, "continuation_thesis", None)
             or getattr(classifier_result, "summary", None)
             or ""
         )
-        kill = getattr(classifier_result, "kill_signal", "") or "—"
-        entry_guidance = ""
-        setup_quality = 0.0
-        risks = []
 
     ticker = _md_escape(getattr(market, "ticker", "?"))
-    asset_class = _md_escape(getattr(market, "asset_class", "?"))
+    price = float(getattr(market, "price", 0.0) or 0.0)
     pct_24h = float(getattr(market, "pct_24h", 0.0) or 0.0)
-    vol = float(getattr(market, "volume_24h_usd", 0.0) or 0.0)
-    oi = float(getattr(market, "oi_usd", 0.0) or 0.0)
-    funding = float(getattr(market, "funding_1h", 0.0) or 0.0)
 
-    plan_block = f"\n\n{_format_plan(plan)}" if plan is not None else ""
+    # ---- TP/SL line — flat, scannable. ----
+    if plan is not None and direction in ("long", "short"):
+        entry = float(getattr(plan, "entry", 0.0) or 0.0)
+        stop = float(getattr(plan, "stop", 0.0) or 0.0)
+        tp1 = float(getattr(plan, "tp1", 0.0) or 0.0)
+        tp2 = float(getattr(plan, "tp2", 0.0) or 0.0)
+        r_tp1 = float(getattr(plan, "r_multiple_tp1", 0.0) or 0.0)
+        r_tp2 = float(getattr(plan, "r_multiple_tp2", 0.0) or 0.0)
+        plan_line = (
+            f"\n*Entry* ${_fmt_price(entry)}  ·  *Stop* ${_fmt_price(stop)}  ·  "
+            f"*TP1* ${_fmt_price(tp1)} ({r_tp1:.1f}R)  ·  *TP2* ${_fmt_price(tp2)} ({r_tp2:.1f}R)"
+        )
+    else:
+        plan_line = ""
 
-    # ---- v3 enrichment badges (advisory only — never gate the alert) ----
-    badges: list[str] = []
-    book_sent = metadata.get("book_sentiment")
-    if book_sent and book_sent != "neutral":
-        emoji = {
-            "strongly bullish": "🟢🟢", "bullish": "🟢",
-            "bearish": "🔴", "strongly bearish": "🔴🔴",
-        }.get(book_sent, "")
-        badges.append(f"{emoji} Crowd: {book_sent}".strip())
-    if metadata.get("vpoc_near_breakout"):
-        vpoc = metadata.get("vpoc_price")
-        if vpoc:
-            badges.append(f"💪 VPOC confirmed @ ${_fmt_price(vpoc)}")
-        else:
-            badges.append("💪 VPOC confirmed")
-    elif metadata.get("vpoc_price") is not None:
-        badges.append("⚪ No volume node near break")
-    if metadata.get("direction_conflict"):
-        cdir = metadata.get("classifier_direction", "?")
-        badges.append(f"⚠️ LLM disagrees (says {cdir})")
-    badges_block = ("\n" + " · ".join(badges)) if badges else ""
+    # ---- Direction-trust flags (only when the user needs to know) ----
+    trust_notes: list[str] = []
+    if flipped and adj is not None:
+        sdir = (metadata.get("structure_direction") or "?").upper()
+        trust_notes.append(f"🔄 flipped from structural {sdir}")
+    if fallback:
+        trust_notes.append("⚙️ LLM unreachable — structural direction only")
+    trust_block = ("\n" + " · ".join(trust_notes)) if trust_notes else ""
 
-    # Stage 2 enrichment lines — appear only when predictor populated them.
-    entry_line = (
-        f"\n*Entry:* {_md_escape(entry_guidance)}" if entry_guidance else ""
-    )
-    quality_line = (
-        f" · *Setup:* {setup_quality*100:.0f}/100" if pred is not None else ""
-    )
-    risks_block = ""
-    if risks:
-        risks_block = "\n\n*Risks:*\n" + "\n".join(f"• {_md_escape(r)}" for r in risks[:3])
-
-    structure_type = metadata.get("structure_type") or "4h"
-    structure_tag = " `[1h]`" if structure_type == "1h" else ""
     body = (
-        f"{direction_emoji} *RADAR — {ticker}* {pct_24h:+.2f}%{promoted_tag}{badges_block}\n"
-        f"{asset_class}{_session_tag(market)}\n\n"
-        f"*BOS confirmed{structure_tag}:* {direction.upper()} above ${_fmt_price(breakout_level)}\n"
-        f"*Catalyst:* {_md_escape(primary)}\n"
-        f"*Type:* {_md_escape(catalyst_type)} · *Conviction:* {conviction*100:.0f}/100{quality_line}\n"
-        f"*Horizon:* {_md_escape(horizon)}{entry_line}\n\n"
-        f"{_md_escape(thesis)}\n\n"
-        f"*Kill:* {_md_escape(kill)}{plan_block}{risks_block}\n\n"
-        f"Vol ${vol/1e6:.1f}M | OI ${oi/1e6:.1f}M | Funding {funding*100:.4f}%\n"
-        f"[Open in Lighter](https://app.lighter.xyz/trade/{ticker})"
+        f"{tier_badge} — *{ticker}*\n"
+        f"Price ${_fmt_price(price)} ({pct_24h:+.2f}%){trust_block}"
+        f"{plan_line}\n\n"
+        f"{_md_escape(thesis)}"
     )
     return _send_main(body, market_label=str(getattr(market, "ticker", "?")))
 

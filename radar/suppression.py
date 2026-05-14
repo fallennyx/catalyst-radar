@@ -140,15 +140,11 @@ def evaluate(
 
     # ---- Rule 0: structural break or watchlist routing ----
     if broke_structure:
-        # NOTE: enrichment-only LLM policy — if the classifier infers a
-        # direction that disagrees with the structural break, we DO NOT
-        # suppress. The structural break is the only trigger. The disagreement
-        # is flagged in the metadata for the alert body so the user sees the
-        # context ("⚠️ LLM disagrees: classifier_dir=…").
-        if config.REQUIRE_DIRECTION_AGREEMENT and classifier_dir is not None:
-            if structure_dir != classifier_dir:
-                metadata["direction_conflict"] = True
-                metadata["classifier_direction"] = classifier_dir
+        # v3.2: structure is the TRIGGER, not the direction. The downstream
+        # direction_adjudicator (radar.direction_adjudicator) is the authority
+        # on the final long/short/no_trade call. We no longer flag a
+        # "direction_conflict" here — the adjudicator decides what to do with
+        # classifier vs structure disagreement.
         # BOS confirmed → promote any existing watchlist entry for this ticker
         # by removing it (the EMIT we're about to fire supersedes it). Then
         # fall through to the remaining rules.

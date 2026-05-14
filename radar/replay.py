@@ -478,9 +478,9 @@ def replay(
                                      classifier=cls, db_path=db_path)
                 if decision == "EMIT":
                     counts["emitted"] += 1
-                    # Prefer the classifier's direction (validated against the
-                    # structural break in Rule 0); fall back to the structural
-                    # direction so replays with --no-classify still build a plan.
+                    # Replay uses the structural direction directly — the
+                    # direction adjudicator is a live-only feature (it needs
+                    # the order book, which historical CSVs don't provide).
                     plan_direction = (
                         str(getattr(cls, "direction", "") or "")
                         or str(metadata.get("structure_direction") or "")
@@ -488,34 +488,7 @@ def replay(
                     plan = trade_plan.compute_plan(
                         market, bar_history, metadata, direction=plan_direction,
                     )
-                    # Stage 2 reasoner — runs only when the classifier is on
-                    # AND a plan was buildable. Skipped under --no-classify.
                     pred = None
-                    if classify and cls is not None and plan is not None and config.STAGE2_ENABLED:
-                        btc_hist = storage.recent_bars(
-                            "BTC", hours=config.STAGE2_BAR_HISTORY_HOURS, db_path=db_path,
-                        )
-                        try:
-                            pred = predictor.analyze(
-                                market, cls, plan, metadata,
-                                bar_history, btc_hist, news, prior_alerts=[],
-                            )
-                        except Exception as e:
-                            log.warning("predictor crashed for %s: %s", market.ticker, e)
-                            pred = None
-                        if pred is not None and pred.verdict in ("DOWNGRADE_TO_WATCHLIST", "DROP"):
-                            log.info(
-                                "Stage 2 %s for %s: %s",
-                                pred.verdict, market.ticker, pred.thesis[:160],
-                            )
-                            counts["emitted"] -= 1
-                            counts["dropped"] += 1
-                            storage.record_alert(
-                                alert, decision="DROP",
-                                reason=f"stage2_{pred.verdict.lower()}",
-                                classifier=cls, db_path=db_path,
-                            )
-                            continue
                     context = {
                         "breakout_level": metadata.get("breakout_level"),
                         "median_bar_range": metadata.get("median_bar_range"),

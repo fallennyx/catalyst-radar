@@ -160,21 +160,20 @@ TELEGRAM_PARSE_MODE = "Markdown"
 SWING_LOOKBACK_HOURS = 48           # how far back to scan for prior 1h swings
 SWING_MIN_AGE_HOURS = 4             # ignore swings inside the most recent N hours
 SWING_MIN_BARS_VALIDATION = 6       # swing must be unbroken for >= N subsequent 1h bars
-RANGE_EXPANSION_MULTIPLIER = 2.0    # current 1h bar range vs median of lookback
+RANGE_EXPANSION_MULTIPLIER = 1.5    # current 1h bar range vs median of lookback (was 2.0; lowered for earlier fires)
 IMPULSE_BYPASS_MULTIPLIER = 2.5     # if current bar range > N x median, bypass BTC-beta gate
 
-# Volume confirmation — fakeouts almost always print on dead volume. Real
-# breakouts come with 2-5x the recent typical volume. Setting this lower than
-# RANGE_EXPANSION_MULTIPLIER on purpose: range is the primary signal; volume is
-# the corroborating witness.
-REQUIRE_VOLUME_CONFIRMATION = True
+# Volume confirmation — disabled per v3 no-suppression invariant. Volume often
+# lags price on real catalyst breakouts (esp. low-cap perps and equity pre-market).
+# Blocking on it was silently suppressing structural breaks. Range is the primary
+# signal; volume can be a badge in the alert body but never a gate.
+REQUIRE_VOLUME_CONFIRMATION = False
 VOLUME_EXPANSION_MULTIPLIER = 1.5
 
-# Higher-timeframe trend alignment — breakouts in the direction of the daily
-# trend follow through ~2-3x more often than counter-trend breakouts. Compares
-# current price vs the median close over the lookback window. Set
-# REQUIRE_HTF_TREND_ALIGNMENT=False to make this a soft filter (logged only).
-REQUIRE_HTF_TREND_ALIGNMENT = True
+# Higher-timeframe trend alignment — disabled per v3 no-suppression invariant.
+# Counter-trend BOS were being dropped silently (had_breakout_structure returned
+# False). Trend context is now informational only; structural breaks fire regardless.
+REQUIRE_HTF_TREND_ALIGNMENT = False
 HTF_TREND_LOOKBACK_HOURS = 168      # 7 days — fits inside BOS_BAR_HISTORY_HOURS=240
 
 # 15m frame — parallel fast-confirmation gate. BOS fires when EITHER the
@@ -201,7 +200,7 @@ BOS_1H_ENABLED = True
 SWING_LOOKBACK_1H_BOS_BARS = 24       # 24 1h bars = 1 day of 1h structure
 SWING_MIN_AGE_1H_BOS_BARS = 1         # skip the in-progress 1h bar
 SWING_MIN_BARS_VALIDATION_1H = 2      # pivot must hold for >=2 1h bars (2h validation)
-RANGE_EXPANSION_MULTIPLIER_1H_ENTRY = 1.5  # lower threshold for earlier detection
+RANGE_EXPANSION_MULTIPLIER_1H_ENTRY = 1.2  # lower threshold for earlier detection (was 1.5)
 
 # How much 1h history to fetch for BOS evaluation. Must be wide enough to
 # synthesize SWING_LOOKBACK_4H_BARS + age + validation 4h bars (with a safety
@@ -210,9 +209,23 @@ BOS_BAR_HISTORY_HOURS = max(SWING_LOOKBACK_HOURS * 2, 240)
 
 WATCHLIST_SCORE_THRESHOLD = 60      # min score to enter watchlist if no BOS yet
 WATCHLIST_TTL_HOURS = 72            # auto-expire stale watchlist entries (72h, not 24h, to capture multi-day catalyst arcs like TON)
-REQUIRE_DIRECTION_AGREEMENT = True  # BOS direction must match LLM direction
 TRIGGER_POLL_INTERVAL_SEC = 60      # how often Tier 2 polls watchlist tickers
 TRIGGER_POLL_MAX_TICKERS = 50       # safety cap; rarely hit in practice
+
+# ============ DIRECTION ADJUDICATOR ============
+# The structural BOS cross is the trigger; the adjudicator (radar.direction_adjudicator)
+# decides the *direction* of the alert by handing every available signal to the LLM
+# (Gemini 2.5 Flash) and accepting its verdict — confirm, flip, or no_trade.
+# When disabled, the engine reverts to today's behavior: structural direction wins,
+# classifier disagreement renders as a "⚠️ LLM disagrees" badge.
+DIRECTION_ADJUDICATOR_ENABLED = True
+DIR_ADJUDICATE_TIER_2 = True        # re-vote on Tier 2 watchlist promotions
+DIR_ALLOW_NO_TRADE = True           # allow LLM to return "no_trade" (still emits ⏸ alert)
+DIR_ALLOW_FLIP = True               # allow LLM to flip direction vs structure
+# Conviction tiers — derived from sqrt(direction_confidence × setup_quality).
+DIR_CONVICTION_STRONG = 0.75
+DIR_CONVICTION_OK = 0.50
+DIR_CONVICTION_TENTATIVE = 0.30
 
 # ============ TRADE PLAN ============
 STOP_BUFFER_PCT = 0.002             # stop = broken swing ± 0.2% so a re-test doesn't immediately stop you out

@@ -26,8 +26,9 @@ from typing import Any
 from dotenv import load_dotenv
 
 from . import (
-    beta, catalysts, classifier, config, fetch_bars, lighter, predictor,
-    ranker, storage, suppression, telegram, trade_plan, universe,
+    beta, catalysts, classifier, config, direction_adjudicator, fetch_bars,
+    lighter, predictor, ranker, storage, suppression, telegram, trade_plan,
+    universe,
 )
 from .suppression import Alert
 
@@ -645,17 +646,6 @@ async def run_discovery_cycle() -> None:
                     metadata.get("swing_low_reference"),
                 )
             elif decision == "EMIT":
-                # Determine direction for the trade plan — prefer the
-                # structural direction (BOS-derived) when classifier disagrees
-                # or is neutral. This is consistent with the no-suppression
-                # policy: structure wins.
-                plan_direction = (
-                    metadata.get("structure_direction")
-                    or str(getattr(result, "direction", "") or "")
-                )
-                plan = trade_plan.compute_plan(
-                    market, bar_history, metadata, direction=plan_direction,
-                )
                 # ---- Volume profile confirmation badge (advisory) ----
                 try:
                     poc = ranker.compute_volume_profile_poc(bar_history)
@@ -665,37 +655,50 @@ async def run_discovery_cycle() -> None:
                 metadata["vpoc_near_breakout"] = ranker.is_breakout_near_poc(
                     metadata.get("breakout_level"), poc,
                 )
-                # ---- Stage 2 enrichment — advisory only ----
-                pred = None
-                if config.STAGE2_ENABLED and plan is not None:
-                    btc_hist = storage.recent_bars(
-                        "BTC", hours=config.STAGE2_BAR_HISTORY_HOURS,
+                # ---- Direction adjudicator — LLM is the direction authority ----
+                # Hands every available signal (structure, wick shape, book,
+                # OI/funding/volume, HTF trend, BTC, news, classifier) to
+                # Gemini and accepts its direction call. Fallback to the
+                # structural direction if the LLM is unreachable.
+                btc_hist = storage.recent_bars(
+                    "BTC", hours=config.STAGE2_BAR_HISTORY_HOURS,
+                )
+                adjudicated = direction_adjudicator.decide(
+                    market=market,
+                    history=bar_history,
+                    history_15m=bar_history_15m or None,
+                    btc_history=btc_hist,
+                    suppression_metadata=metadata,
+                    classifier_result=result,
+                    news_items=news,
+                    prior_alerts=[],
+                    tier=1,
+                )
+                metadata["adjudicated"] = adjudicated
+                metadata["predictor_result"] = adjudicated.predictor_result
+                # Build the trade plan in the adjudicated direction. When the
+                # LLM returns 'no_trade', skip the plan — the alert renders as
+                # ⏸ with thesis but no entry/stop/TP block.
+                plan = None
+                if adjudicated.direction in ("long", "short"):
+                    plan = trade_plan.compute_plan(
+                        market, bar_history, metadata,
+                        direction=adjudicated.direction,
                     )
-                    try:
-                        pred = predictor.analyze(
-                            market, result, plan, metadata,
-                            bar_history, btc_hist, news, prior_alerts=[],
-                        )
-                    except Exception as e:
-                        log.warning("Stage 2 crashed for %s: %s", market.ticker, e)
-                        pred = None
-                # Stage 2 verdicts (DROP / DOWNGRADE_TO_WATCHLIST) are now
-                # ADVISORY — they appear in the alert body as warnings but
-                # never block the alert. v3 policy: BOS is the only suppressor.
-                metadata = {**metadata, "predictor_result": pred}
                 telegram.send_bos_alert(
                     market, result, metadata,
                     source="tier1_immediate", plan=plan,
                 )
                 log.info(
-                    "Tier 1 → EMIT %s %s at break of %s%s%s",
+                    "Tier 1 → EMIT %s %s at break of %s [%s %s%s]%s",
                     market.ticker,
                     getattr(result, "catalyst_type", "?"),
                     metadata.get("breakout_level"),
+                    adjudicated.conviction_tier,
+                    adjudicated.direction.upper(),
+                    " flipped" if adjudicated.flipped else "",
                     f" plan(stop={plan.stop:.4f} tp1={plan.tp1:.4f} tp2={plan.tp2:.4f})"
                     if plan is not None else " (no plan)",
-                    f" [stage2={pred.verdict}]"
-                    if pred is not None and pred.verdict != "ALERT_NOW" else "",
                 )
             else:
                 log.info("Tier 1 → DROP %s: %s", market.ticker, reason)
@@ -767,6 +770,8 @@ async def run_trigger_poll() -> None:
 
             metadata = {
                 "breakout_level": breakout_level,
+                "structure_direction": direction,
+                "structure_type": "tier2",
                 "swing_high_reference": entry.get("swing_high_reference"),
                 "swing_low_reference": entry.get("swing_low_reference"),
                 "median_bar_range": entry.get("median_bar_range"),
@@ -774,16 +779,59 @@ async def run_trigger_poll() -> None:
                 "hours_on_watchlist": hours_on_watchlist,
             }
 
-            # Pull a wider history window so the trade plan can find a "next
-            # prior swing" target; `recent` (2h) is too narrow.
+            # Pull a wider history window so the adjudicator + trade plan can
+            # see real context; `recent` (2h) is too narrow.
             plan_history = storage.recent_bars(
                 ticker, hours=config.BOS_BAR_HISTORY_HOURS,
             )
-            plan = trade_plan.compute_plan(
-                live_market, plan_history, metadata,
-                direction=str(getattr(result, "direction", "")
-                              or entry.get("direction_bias") or ""),
+            plan_history_15m = storage.recent_bars_15m(
+                ticker, bars=config.BOS_15M_HISTORY_BARS,
             )
+
+            # ---- Direction adjudicator re-vote at Tier 2 fire ----
+            # The stored direction_bias may be hours/days stale. Hand the
+            # current state to the LLM so it can confirm/flip/no_trade based
+            # on what's true RIGHT NOW (live book, fresh news, current bar
+            # wick shape). Gated by config.DIR_ADJUDICATE_TIER_2.
+            adjudicated = None
+            if config.DIR_ADJUDICATE_TIER_2:
+                btc_hist = storage.recent_bars(
+                    "BTC", hours=config.STAGE2_BAR_HISTORY_HOURS,
+                )
+                try:
+                    news = catalysts.fetch_for_market(
+                        live_market, lookback_hours=config.NEWS_LOOKBACK_HOURS,
+                    )
+                except Exception:
+                    news = []
+                adjudicated = direction_adjudicator.decide(
+                    market=live_market,
+                    history=plan_history,
+                    history_15m=plan_history_15m or None,
+                    btc_history=btc_hist,
+                    suppression_metadata=metadata,
+                    classifier_result=result,
+                    news_items=news,
+                    prior_alerts=[],
+                    tier=2,
+                    watchlist_age_hours=hours_on_watchlist,
+                )
+                metadata["adjudicated"] = adjudicated
+                metadata["predictor_result"] = adjudicated.predictor_result
+
+            # Resolve final direction for the trade plan
+            if adjudicated is not None:
+                final_dir = adjudicated.direction
+            else:
+                final_dir = str(
+                    getattr(result, "direction", "") or entry.get("direction_bias") or ""
+                )
+
+            plan = None
+            if final_dir in ("long", "short"):
+                plan = trade_plan.compute_plan(
+                    live_market, plan_history, metadata, direction=final_dir,
+                )
 
             telegram.send_bos_alert(
                 live_market, result, metadata,
