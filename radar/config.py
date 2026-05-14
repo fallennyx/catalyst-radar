@@ -59,18 +59,28 @@ SECTOR_DAY_THRESHOLD = 5  # vestigial — Rule 3 removed in v3, kept here so any
                           # legacy import sites still resolve. Unused at runtime.
 
 # ============ LLM ============
-# Provider switch: "gemini" (cheapest, free 1500/day) | "anthropic" (Haiku fallback)
-LLM_PROVIDER = "gemini"
+# Provider switch: "groq" (current default — Llama 3.3 70B via Groq) |
+# "gemini" (legacy, quota-limited) | "anthropic" (Haiku fallback)
+LLM_PROVIDER = "groq"
 
-# Anthropic (Haiku) — fallback / legacy path
+# Anthropic (Haiku) — legacy
 HAIKU_MODEL = "claude-haiku-4-5-20251001"
 HAIKU_MAX_TOKENS = 1024
 HAIKU_TEMPERATURE = 0.0
 
-# Gemini (primary, cheapest tool-using LLM)
+# Gemini — legacy (left in place for fallback / replay; not used when
+# LLM_PROVIDER == "groq")
 GEMINI_MODEL = "gemini-2.5-flash"
 GEMINI_MAX_TOKENS = 1024
 GEMINI_TEMPERATURE = 0.0
+
+# Groq (current primary). OpenAI-compatible REST API with `json_object`
+# response_format → robust structured output across 163 tickers.
+GROQ_MODEL = "llama-3.3-70b-versatile"
+GROQ_BASE_URL = "https://api.groq.com/openai/v1"
+GROQ_MAX_TOKENS = 1024
+GROQ_TEMPERATURE = 0.0
+GROQ_HTTP_TIMEOUT = 30
 
 # ---- Stage 2 — full-context reasoner (predictor.py) ----
 # Runs only on candidates that survive the suppression chain. Sees price
@@ -78,10 +88,10 @@ GEMINI_TEMPERATURE = 0.0
 # Verdict can DOWNGRADE to watchlist or DROP, but never overrules a confirmed
 # structural break to upgrade.
 STAGE2_ENABLED = True
-STAGE2_MODEL = "gemini-2.5-flash"
-STAGE2_MAX_TOKENS = 2048
+STAGE2_MODEL = "llama-3.3-70b-versatile"
+STAGE2_MAX_TOKENS = 1024
 STAGE2_TEMPERATURE = 0.2
-STAGE2_THINKING_BUDGET = 4096   # tokens of internal reasoning before output
+STAGE2_THINKING_BUDGET = 0      # vestigial (Gemini-only); ignored by Groq
 STAGE2_BAR_HISTORY_HOURS = 48   # how much OHLCV to show the model
 
 # Cost gate: only call the classifier when the candidate has a real chance of

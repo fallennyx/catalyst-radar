@@ -282,6 +282,112 @@ def _extract_tool_input(response: Any) -> dict[str, Any] | None:
     return None
 
 
+# ============ Groq call (OpenAI-compatible JSON mode) ============
+
+_GROQ_OUTPUT_SCHEMA_BLOCK = """Respond with a JSON object — and ONLY a JSON object, no surrounding prose, no code fences. Exactly these keys:
+
+{
+  "catalyst_type": "<one of: earnings, guidance, regulatory, macro, tokenomics, partnership, exchange_listing, exploit_or_outage, etf_or_fund_flow, geopolitics, technical_breakout, rumor, none>",
+  "direction": "long" | "short" | "neutral",
+  "confidence": <number 0.0-1.0>,
+  "summary": "<one-sentence plain-English explanation, max ~400 chars>",
+  "evidence_quotes": ["<verbatim quote 1>", "..."],
+  "is_actionable": true | false
+}
+
+- evidence_quotes: 0-3 entries, each MUST be an exact verbatim substring of the news bundle (title or body). If you can't find a real verbatim quote, leave the array empty.
+- If nothing in the bundle plausibly explains the move, return catalyst_type="none", direction="neutral", is_actionable=false, evidence_quotes=[].
+- Output nothing else — no preamble, no markdown, just the JSON object."""
+
+
+def _parse_classifier_json(content: str) -> dict | None:
+    if not content:
+        return None
+    s = content.strip()
+    if s.startswith("```"):
+        s = s.strip("`")
+        if s.lower().startswith("json"):
+            s = s[4:]
+        s = s.strip()
+    start = s.find("{")
+    end = s.rfind("}")
+    if start == -1 or end == -1 or end <= start:
+        return None
+    try:
+        obj = json.loads(s[start:end + 1])
+    except (ValueError, TypeError):
+        return None
+    return obj if isinstance(obj, dict) else None
+
+
+def _classify_groq(market: Market, news_items: list[NewsItem]) -> ClassifierResult | None:
+    """Call Groq + Llama 3.3 70B via OpenAI-compatible chat completions in JSON
+    mode. No SDK, no new dependency."""
+    api_key = os.environ.get("GROQ_API_KEY")
+    if not api_key:
+        log.warning("GROQ_API_KEY not set — classifier will return None")
+        return None
+    try:
+        import requests  # noqa: WPS433
+    except Exception as e:
+        log.warning("requests unavailable for Groq call: %s", e)
+        return None
+
+    user_prompt = _build_user_prompt(market, news_items) + "\n\n" + _GROQ_OUTPUT_SCHEMA_BLOCK
+
+    url = f"{config.GROQ_BASE_URL}/chat/completions"
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+    }
+    body = {
+        "model": config.GROQ_MODEL,
+        "messages": [
+            {"role": "system", "content": _SYSTEM_PROMPT},
+            {"role": "user", "content": user_prompt},
+        ],
+        "temperature": config.GROQ_TEMPERATURE,
+        "max_tokens": config.GROQ_MAX_TOKENS,
+        "response_format": {"type": "json_object"},
+    }
+
+    try:
+        r = requests.post(url, headers=headers, json=body, timeout=config.GROQ_HTTP_TIMEOUT)
+    except Exception as e:
+        log.warning("Groq classifier call failed for %s: %s", market.ticker, e)
+        return None
+    if r.status_code != 200:
+        log.warning("Groq classifier returned %d for %s: %s",
+                    r.status_code, market.ticker, r.text[:200])
+        return None
+    try:
+        payload = r.json()
+    except ValueError:
+        log.warning("Groq classifier returned non-JSON envelope for %s", market.ticker)
+        return None
+
+    try:
+        content = (payload.get("choices") or [{}])[0].get("message", {}).get("content", "")
+    except (AttributeError, IndexError, TypeError):
+        content = ""
+    args = _parse_classifier_json(content)
+    if args is None:
+        log.warning("Groq classifier: could not parse JSON content for %s", market.ticker)
+        return None
+
+    try:
+        result = ClassifierResult(**args)
+    except ValidationError as e:
+        log.warning("Groq classifier: pydantic validation failed for %s: %s", market.ticker, e)
+        return None
+
+    corpus = _build_news_corpus(news_items)
+    if not _validate_quotes(result.evidence_quotes, corpus):
+        log.info("Groq classifier: dropped %s — fabricated evidence quote", market.ticker)
+        return None
+    return result
+
+
 # ============ Gemini call (REST, no SDK) ============
 
 # Mirror of CLASSIFY_TOOL into Gemini's function-declaration schema. Gemini
@@ -440,8 +546,10 @@ def classify(market: Market, news_items: list[NewsItem]) -> ClassifierResult | N
     # based on the LLM's verdict. Whatever the LLM returns (or None on error)
     # is folded into the alert body as commentary, not as a gate.
 
-    # Route by configured provider. Gemini is the cheapest-tier default;
-    # Anthropic Haiku is the no-key fallback / opt-in path.
+    # Route by configured provider. Groq (Llama 3.3 70B) is the current default;
+    # Gemini and Anthropic Haiku are kept for fallback / replay.
+    if config.LLM_PROVIDER == "groq":
+        return _classify_groq(market, news_items)
     if config.LLM_PROVIDER == "gemini":
         return _classify_gemini(market, news_items)
 

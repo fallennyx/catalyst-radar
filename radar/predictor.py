@@ -69,110 +69,6 @@ class PredictorResult:
     risks: list[str] = field(default_factory=list)
 
 
-_ANALYZE_TOOL = {
-    "name": "decide_direction",
-    "description": (
-        "Record your direction call on this structural breakout candidate. "
-        "You are the FINAL authority on which way (if any) the user should trade. "
-        "All fields are required except 'risks'."
-    ),
-    "parameters": {
-        "type": "object",
-        "properties": {
-            "final_direction": {
-                "type": "string",
-                "enum": sorted(VALID_DIRECTIONS),
-                "description": (
-                    "Your direction call. 'long' = user should buy. 'short' = user should "
-                    "sell short. 'no_trade' = the structural cross fired but the situation "
-                    "is ambiguous (sweep, conflicting catalyst, weak confirmation) and "
-                    "trading either side now is a coin flip. Use 'no_trade' liberally when "
-                    "evidence is mixed — it's better than putting the user into a bad trade. "
-                    "You MAY override the structural direction (long break → short call) when "
-                    "evidence strongly supports a fade — but only with concrete reasons."
-                ),
-            },
-            "direction_confidence": {
-                "type": "number",
-                "description": (
-                    "How sure are you of final_direction? [0,1]. "
-                    ">=0.75 = strong (all signals agree, clean setup). "
-                    "0.5-0.75 = OK (most signals agree, some mixed). "
-                    "0.3-0.5 = tentative (real but contested). "
-                    "<0.3 = no_trade territory. Be honest — this controls how the user sizes."
-                ),
-            },
-            "setup_quality": {
-                "type": "number",
-                "description": (
-                    "Overall setup cleanliness [0,1]. Clean impulsive break, good distance "
-                    "past pivot, confirming volume = high. Sloppy wick, low volume, choppy "
-                    "leading bars = low. Independent of direction_confidence — a setup can "
-                    "be high-quality but ambiguous direction."
-                ),
-            },
-            "thesis": {
-                "type": "string",
-                "description": (
-                    "2-4 sentences in plain English explaining (a) why you chose this "
-                    "direction and (b) what's driving the move. Reference specific signals "
-                    "(e.g. 'OI rising into the break + bid-heavy book + earnings beat'). "
-                    "Talk like a colleague. No jargon for jargon's sake. If you chose "
-                    "'no_trade' or flipped direction, the thesis MUST justify why."
-                ),
-            },
-            "kill_signal": {
-                "type": "string",
-                "description": (
-                    "The specific price level or condition that invalidates this trade. "
-                    "Plain English. Example: 'Below $0.1450 — that's where the breakout "
-                    "fails and structure reverses.'"
-                ),
-            },
-            "expected_horizon": {
-                "type": "string",
-                "enum": sorted(VALID_HORIZONS),
-                "description": "How long the trade typically takes to resolve.",
-            },
-            "expected_r_multiple": {
-                "type": "number",
-                "description": (
-                    "Realistic R-multiple target based on structure and context. "
-                    "1.5 = small move, 3 = decent breakout, 5+ = trending breakout."
-                ),
-            },
-            "entry_guidance": {
-                "type": "string",
-                "description": (
-                    "How to enter. Examples: 'market', 'pullback to $0.1466', "
-                    "'wait for retest of $0.1456 breakout level'. If final_direction "
-                    "is 'no_trade', set this to 'no trade — wait'."
-                ),
-            },
-            "verdict": {
-                "type": "string",
-                "enum": sorted(VALID_VERDICTS),
-                "description": (
-                    "Advisory severity tag. ALERT_NOW = clean. DOWNGRADE_TO_WATCHLIST = "
-                    "mixed. DROP = strongly contradicting. Used only for log labelling; "
-                    "the alert still sends regardless."
-                ),
-            },
-            "risks": {
-                "type": "array",
-                "items": {"type": "string"},
-                "description": "1-3 specific things that could go wrong.",
-            },
-        },
-        "required": [
-            "final_direction", "direction_confidence", "setup_quality",
-            "thesis", "kill_signal", "expected_horizon",
-            "expected_r_multiple", "entry_guidance", "verdict",
-        ],
-    },
-}
-
-
 _SYSTEM_PROMPT = """You are an experienced discretionary daytrader. You are reviewing a structural breakout candidate that has already passed a deterministic gate: price crossed a swing pivot with confirming range expansion.
 
 Your job is to decide the TRADE DIRECTION the user should take RIGHT NOW. The user will read your call on Telegram and act on it immediately, so be honest: if the situation is ambiguous, say 'no_trade'. A missed setup costs nothing; a wrong-way alert can lose real money.
@@ -202,12 +98,23 @@ DIRECTIONAL EVIDENCE TO WEIGH
 DECISION RULES (strict)
 
 - DEFAULT: confirm the structural direction with high confidence when 3+ signals above clearly agree.
-- FLIP (long structure → short call, or vice versa) ONLY when (a) sweep evidence is clear AND (b) at least 2 other signals point the opposite way. Flipping is rare and you must justify it concretely in the thesis.
+- FLIP (long structure → short call, or vice versa) ONLY when (a) sweep evidence is clear AND (b) at least 2 other signals point the opposite way. Flipping is rare and you must justify it concretely in the reason.
 - NO_TRADE when signals are genuinely split — e.g. structure says long, catalyst says short, book is neutral, OI is mixed. Don't force a call.
-- direction_confidence must reflect reality. If you are 60% sure of long, output 0.6, not 0.9. The user sizes off this number.
+- confidence must reflect reality. If you are 60% sure of long, output 60, not 90. The user sizes off this number.
 
 OUTPUT FORMAT
-Call the `decide_direction` tool. Every required field must be populated. Be specific in the thesis — name the signals you weighed. Be specific in the kill_signal — name the exact price."""
+Respond with a JSON object — and ONLY a JSON object, no surrounding prose, no code fences. Exactly these keys:
+
+{
+  "direction": "long" | "short" | "no_trade",
+  "confidence": <integer 0-100>,
+  "reason": "<2-4 sentences in plain English. Reference the specific signals you weighed (sweep, OI, book, catalyst, HTF, BTC). Name the invalidation price. Talk like a colleague. If you chose no_trade or flipped vs structure, the reason MUST justify why.>"
+}
+
+- direction MUST be one of the three strings above (lowercase). Anything else is a hard error.
+- confidence is an INTEGER on the 0-100 scale (not 0-1). 80+ = strong, 50-79 = OK, 30-49 = tentative, <30 = no_trade territory.
+- reason is required and must be non-empty.
+- Output nothing else — no preamble, no markdown, just the JSON object."""
 
 
 # ============ context builders ============
@@ -376,12 +283,39 @@ def _build_user_prompt(
         f"=== RECENT 48h 1h OHLCV ===\n{_format_ohlc_table(bar_history, config.STAGE2_BAR_HISTORY_HOURS)}\n\n"
         f"=== LAST 8 15m BARS ===\n{_format_15m_tail(bars_15m, n=8)}\n\n"
         f"=== RECENT ALERTS ON THIS TICKER (past 7d) ===\n{_format_prior_alerts(prior_alerts)}\n\n"
-        f"Call the decide_direction tool. Be honest about ambiguity — use 'no_trade' "
-        f"liberally when signals split. Justify every flip in the thesis with concrete signals."
+        f"Respond with the JSON object specified in the system prompt — keys: "
+        f"direction, confidence (0-100 integer), reason. No code fences, no prose around it. "
+        f"Be honest about ambiguity — use 'no_trade' liberally when signals split. Justify "
+        f"every flip in the reason with concrete signals."
     )
 
 
-# ============ Gemini call ============
+# ============ Groq call (OpenAI-compatible JSON mode) ============
+
+def _parse_json_payload(content: str) -> dict | None:
+    """Extract a JSON object from the LLM response. JSON mode is strict on Groq,
+    but be defensive — strip code fences and lead-in prose just in case."""
+    if not content:
+        return None
+    s = content.strip()
+    # Strip ```json ... ``` fences if the model added them despite JSON mode.
+    if s.startswith("```"):
+        s = s.strip("`")
+        if s.lower().startswith("json"):
+            s = s[4:]
+        s = s.strip()
+    # Slice to the outermost { } if there's any leading/trailing text.
+    start = s.find("{")
+    end = s.rfind("}")
+    if start == -1 or end == -1 or end <= start:
+        return None
+    blob = s[start:end + 1]
+    try:
+        obj = json.loads(blob)
+    except (ValueError, TypeError):
+        return None
+    return obj if isinstance(obj, dict) else None
+
 
 def analyze(
     market: Market,
@@ -392,16 +326,17 @@ def analyze(
     news_items: list[NewsItem],
     prior_alerts: list[dict] | None = None,
 ) -> PredictorResult | None:
-    """Run the direction adjudicator. Returns ``None`` only on infrastructure
-    failure (no key, library missing) — callers fall back to the structural
-    direction in that case. API errors return ``None`` too; the alert path
-    must never crash on a predictor failure.
+    """Run the direction adjudicator via Groq + Llama 3.3 70B (JSON mode).
+
+    Returns ``None`` only on infrastructure failure (no key, library missing,
+    HTTP error, malformed JSON) — callers fall back to the structural direction
+    in that case. The alert path must never crash on a predictor failure.
     """
     if not config.STAGE2_ENABLED and not config.DIRECTION_ADJUDICATOR_ENABLED:
         return None
-    api_key = os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
+    api_key = os.environ.get("GROQ_API_KEY")
     if not api_key:
-        log.warning("predictor: GEMINI_API_KEY not set — skipping adjudication")
+        log.warning("predictor: GROQ_API_KEY not set — skipping adjudication")
         return None
     try:
         import requests  # noqa: WPS433
@@ -415,91 +350,83 @@ def analyze(
         news_items or [], prior_alerts or [],
     )
 
-    url = (
-        f"https://generativelanguage.googleapis.com/v1beta/models/"
-        f"{config.STAGE2_MODEL}:generateContent?key={api_key}"
-    )
+    url = f"{config.GROQ_BASE_URL}/chat/completions"
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+    }
     body = {
-        "systemInstruction": {"parts": [{"text": _SYSTEM_PROMPT}]},
-        "contents": [{
-            "role": "user",
-            "parts": [{"text": user_prompt}],
-        }],
-        "tools": [{"functionDeclarations": [_ANALYZE_TOOL]}],
-        "toolConfig": {
-            "functionCallingConfig": {
-                "mode": "ANY",
-                "allowedFunctionNames": ["decide_direction"],
-            }
-        },
-        "generationConfig": {
-            "temperature": config.STAGE2_TEMPERATURE,
-            "maxOutputTokens": config.STAGE2_MAX_TOKENS,
-            "thinkingConfig": {
-                "thinkingBudget": int(config.STAGE2_THINKING_BUDGET),
-            },
-        },
+        "model": config.STAGE2_MODEL,
+        "messages": [
+            {"role": "system", "content": _SYSTEM_PROMPT},
+            {"role": "user", "content": user_prompt},
+        ],
+        "temperature": config.STAGE2_TEMPERATURE,
+        "max_tokens": config.STAGE2_MAX_TOKENS,
+        "response_format": {"type": "json_object"},
     }
 
     try:
-        r = requests.post(url, json=body, timeout=45)
+        r = requests.post(url, headers=headers, json=body, timeout=config.GROQ_HTTP_TIMEOUT)
     except Exception as e:
-        log.warning("predictor: Gemini call failed for %s: %s", market.ticker, e)
+        log.warning("predictor: Groq call failed for %s: %s", market.ticker, e)
         return None
     if r.status_code != 200:
-        log.warning("predictor: Gemini returned %d for %s: %s",
+        log.warning("predictor: Groq returned %d for %s: %s",
                     r.status_code, market.ticker, r.text[:200])
         return None
     try:
         payload = r.json()
     except ValueError:
-        log.warning("predictor: Gemini returned non-JSON for %s", market.ticker)
-        return None
-
-    candidates = payload.get("candidates") or []
-    args: dict | None = None
-    for cand in candidates:
-        for part in (cand.get("content") or {}).get("parts") or []:
-            fc = part.get("functionCall")
-            if fc and fc.get("name") == "decide_direction":
-                args = fc.get("args") or {}
-                break
-        if args is not None:
-            break
-    if args is None:
-        log.warning("predictor: no functionCall in response for %s", market.ticker)
+        log.warning("predictor: Groq returned non-JSON envelope for %s", market.ticker)
         return None
 
     try:
-        direction = str(args.get("final_direction", "")).lower().strip()
+        content = (payload.get("choices") or [{}])[0].get("message", {}).get("content", "")
+    except (AttributeError, IndexError, TypeError):
+        content = ""
+    args = _parse_json_payload(content)
+    if args is None:
+        log.warning("predictor: could not parse JSON content for %s: %r",
+                    market.ticker, (content or "")[:200])
+        return None
+
+    try:
+        direction = str(args.get("direction", "")).lower().strip()
         if direction not in VALID_DIRECTIONS:
-            # If the LLM returns garbage, fall back to the structural direction
-            # (preserves the v3 no-suppression invariant: the alert still fires).
+            # Garbage direction → fall back to structural (preserves v3
+            # no-suppression invariant: alert still fires).
             direction = (signal_bundle or {}).get("structure_direction") or "no_trade"
-        # Honor config flags
         if direction == "no_trade" and not config.DIR_ALLOW_NO_TRADE:
             direction = (signal_bundle or {}).get("structure_direction") or "long"
         if config.DIR_ALLOW_FLIP is False:
             sdir = (signal_bundle or {}).get("structure_direction")
             if sdir in ("long", "short") and direction in ("long", "short") and direction != sdir:
                 direction = sdir
-        verdict = str(args.get("verdict", "ALERT_NOW")).upper()
-        if verdict not in VALID_VERDICTS:
-            verdict = "ALERT_NOW"
-        horizon = str(args.get("expected_horizon", "intraday"))
-        if horizon not in VALID_HORIZONS:
-            horizon = "intraday"
+
+        # Confidence: accept 0-100 (preferred) or 0-1 (defensive). Normalize → [0,1].
+        raw_conf = args.get("confidence", 50)
+        try:
+            cf = float(raw_conf)
+        except (TypeError, ValueError):
+            cf = 50.0
+        if cf > 1.0:
+            cf = cf / 100.0
+        confidence = max(0.0, min(1.0, cf))
+
+        reason = str(args.get("reason", "") or "").strip()[:1500]
+
         return PredictorResult(
             final_direction=direction,
-            direction_confidence=max(0.0, min(1.0, float(args.get("direction_confidence", 0.5)))),
-            setup_quality=max(0.0, min(1.0, float(args.get("setup_quality", 0.5)))),
-            thesis=str(args.get("thesis", ""))[:1500],
-            kill_signal=str(args.get("kill_signal", ""))[:500],
-            expected_horizon=horizon,
-            expected_r_multiple=float(args.get("expected_r_multiple", 1.5)),
-            entry_guidance=str(args.get("entry_guidance", "market"))[:200],
-            verdict=verdict,
-            risks=[str(r)[:200] for r in (args.get("risks") or [])][:3],
+            direction_confidence=confidence,
+            setup_quality=confidence,           # collapsed schema — single conviction value
+            thesis=reason,
+            kill_signal="",
+            expected_horizon="intraday",
+            expected_r_multiple=1.5,
+            entry_guidance="market" if direction in ("long", "short") else "no trade — wait",
+            verdict="ALERT_NOW",
+            risks=[],
         )
     except (TypeError, ValueError) as e:
         log.warning("predictor: parsing failed for %s: %s", market.ticker, e)
