@@ -1,0 +1,503 @@
+
+==============================================================================
+0. DATASET OVERVIEW & BASELINES
+==============================================================================
+Rows: 481
+      signed_ret_+1h_pct: N=481 WR= 49.5% avg=+0.233% med=+0.000% std=4.771
+      signed_ret_+2h_pct: N=481 WR= 42.4% avg=+0.026% med=-0.282% std=5.006
+      signed_ret_+4h_pct: N=479 WR= 40.7% avg=-0.019% med=-0.391% std=4.737
+      signed_ret_+8h_pct: N=474 WR= 42.0% avg=-0.087% med=-0.464% std=5.222
+                 max_ret: N=481 WR= 71.9% avg=+2.010% med=+0.765% std=6.283
+
+Direction: {'long': 386, 'short': 95}
+Asset class: {'crypto_t2': 329, 'crypto_t1': 104, 'crypto_meme': 45, 'commodity': 3}
+structure_type: {'4h_and_1h': 451, '4h': 29, '1h': 1}
+db windows: {'apr05-may06': 361, 'may07-may09': 69, 'may09-may11': 39, 'feb25-mar23': 12}
+
+Profit paths:
+  early win held (1h>0 & 4h>0):     136
+  early loss recovered (1h<0 & 4h>0):57
+  early win reversed (1h>0 & 4h<0): 100
+  consistent loss (1h<0 & 4h<0):    175
+  peak horizon distribution: {1: 186, 2: 74, 4: 83, 8: 138}
+  hit +1% (best of 1h/2h/4h>=1%): 38.3% (184)
+
+==============================================================================
+A. BOS STRUCTURE QUALITY
+==============================================================================
+
+-- structure_type vs signed_ret_+4h_pct --
+              1h: N=   1  WR=100.0%  lift=2.46  avg= +3.57%  med= +3.57%  std=  nan  (N<20!)
+              4h: N=  29  WR= 44.8%  lift=1.10  avg= +0.12%  med= -0.95%  std= 3.56
+       4h_and_1h: N= 449  WR= 40.3%  lift=0.99  avg= -0.04%  med= -0.38%  std= 4.81
+
+-- structure_type vs signed_ret_+1h_pct --
+              1h: N=   1  WR=100.0%  lift=2.46  avg= +0.69%  med= +0.69%  std=  nan  (N<20!)
+              4h: N=  29  WR= 41.4%  lift=1.02  avg= -0.05%  med= -0.09%  std= 1.61
+       4h_and_1h: N= 451  WR= 49.9%  lift=1.23  avg= +0.25%  med= +0.00%  std= 4.91
+
+Mann-Whitney 4h_and_1h vs 4h (+4h): p=0.9580
+
+-- breakout_dist_pct buckets vs signed_ret_+4h_pct --
+             <1%: N= 176  WR= 39.8%  lift=0.98  avg= +0.07%  med= -0.21%  std= 4.48
+            1-3%: N= 202  WR= 39.1%  lift=0.96  avg= -0.24%  med= -0.58%  std= 3.57
+            3-6%: N=  79  WR= 46.8%  lift=1.15  avg= +0.46%  med= -0.30%  std= 6.76
+             >6%: N=  22  WR= 40.9%  lift=1.01  avg= -0.44%  med= -0.74%  std= 7.05
+
+-- breakout_dist_pct buckets vs signed_ret_+1h_pct --
+             <1%: N= 177  WR= 48.6%  lift=1.19  avg= +0.53%  med= -0.01%  std= 7.20
+            1-3%: N= 202  WR= 51.5%  lift=1.26  avg= +0.18%  med= +0.03%  std= 1.89
+            3-6%: N=  80  WR= 46.2%  lift=1.14  avg= -0.36%  med= -0.44%  std= 2.72
+             >6%: N=  22  WR= 50.0%  lift=1.23  avg= +0.46%  med= +0.03%  std= 4.59
+
+Correlation breakout_dist_pct vs +4h: -0.0473 (spearman)
+
+==============================================================================
+B. ALPHA-Z DECOUPLING
+==============================================================================
+
+-- abs_az buckets vs signed_ret_+4h_pct --
+              <2: N= 119  WR= 38.7%  lift=0.95  avg= -0.07%  med= -0.27%  std= 2.85
+             2-3: N=  90  WR= 30.0%  lift=0.74  avg= -0.77%  med= -0.85%  std= 2.21
+             3-5: N= 172  WR= 43.6%  lift=1.07  avg= -0.02%  med= -0.38%  std= 3.66
+              >5: N=  95  WR= 46.3%  lift=1.14  avg= +0.73%  med= -0.38%  std= 8.59
+
+-- abs_az buckets vs signed_ret_+1h_pct --
+              <2: N= 119  WR= 42.9%  lift=1.05  avg= -0.09%  med= -0.08%  std= 1.20
+             2-3: N=  91  WR= 58.2%  lift=1.43  avg= +0.10%  med= +0.14%  std= 1.60
+             3-5: N= 172  WR= 50.0%  lift=1.23  avg= +0.08%  med= +0.01%  std= 2.07
+              >5: N=  96  WR= 47.9%  lift=1.18  avg= +1.02%  med= -0.05%  std=10.11
+
+Spearman |alpha_z| vs +4h: -0.0044
+Spearman |r_alpha_pct| vs +4h: -0.0435
+
+By direction, |alpha_z|>=3:
+   long: N= 228  WR= 43.0%  lift=1.06  avg= +0.28%  med= -0.39%  std= 6.25
+  short: N=  42  WR= 57.1%  lift=1.40  avg= +0.13%  med= +0.28%  std= 3.15
+
+alpha_z>=3 X score_pctile granular (+4h):
+  az[2,3) pctile[0,50): N=  66  WR= 34.8%  lift=0.86  avg= -0.47%  med= -0.75%  std= 2.29
+  az[2,3) pctile[50,75): N=  17  WR= 17.6%  lift=0.43  avg= -1.32%  med= -1.60%  std= 1.55
+  az[2,3) pctile[75,101): N=   7  WR= 14.3%  lift=0.35  avg= -2.27%  med= -2.08%  std= 2.15
+  az[3,5) pctile[0,50): N=  75  WR= 41.3%  lift=1.02  avg= +0.04%  med= -0.24%  std= 2.93
+  az[3,5) pctile[50,75): N=  65  WR= 40.0%  lift=0.98  avg= -0.34%  med= -0.65%  std= 3.49
+  az[3,5) pctile[75,101): N=  32  WR= 56.2%  lift=1.38  avg= +0.51%  med= +0.38%  std= 5.27
+  az[5,99) pctile[0,50): N=  13  WR= 23.1%  lift=0.57  avg= -1.49%  med= -0.74%  std= 3.82
+  az[5,99) pctile[50,75): N=  22  WR= 31.8%  lift=0.78  avg= -1.12%  med= -1.58%  std= 2.75
+  az[5,99) pctile[75,101): N=  60  WR= 56.7%  lift=1.39  avg= +1.88%  med= +0.21%  std=10.40
+
+==============================================================================
+C. MARKET REGIME VIA BTC
+==============================================================================
+
+-- aligned vs signed_ret_+4h_pct --
+               1: N= 350  WR= 38.9%  lift=0.95  avg= -0.04%  med= -0.39%  std= 4.79
+               0: N= 129  WR= 45.7%  lift=1.12  avg= +0.05%  med= -0.38%  std= 4.61
+  (aligned=1 means alert dir agrees w/ btc_ret_4h sign)
+
+-- btc_ret_4h_pct buckets vs signed_ret_+4h_pct --
+            <-1%: N=  33  WR= 33.3%  lift=0.82  avg= +0.05%  med= -0.39%  std= 3.19
+           -1..0: N= 149  WR= 47.0%  lift=1.15  avg= +0.20%  med= -0.15%  std= 4.11
+           0..1%: N= 192  WR= 39.6%  lift=0.97  avg= -0.61%  med= -0.92%  std= 3.81
+           1..2%: N=  66  WR= 45.5%  lift=1.12  avg= +1.32%  med= -0.05%  std= 8.62
+             >2%: N=  39  WR= 20.5%  lift=0.50  avg= -0.30%  med= -0.39%  std= 1.66
+
+-- btc_range_expansion vs signed_ret_+4h_pct --
+               1: N= 159  WR= 39.6%  lift=0.97  avg= -0.18%  med= -0.21%  std= 2.72
+               0: N= 320  WR= 41.2%  lift=1.01  avg= +0.06%  med= -0.69%  std= 5.47
+
+Same-timescale predictor test:
+  Spearman btc_ret_1h vs +1h: 0.0072
+  Spearman btc_ret_4h vs +4h: -0.0389
+
+Long alerts by btc_ret_4h sign:
+  long & btc up: N= 276  WR= 37.7%  lift=0.93  avg= -0.07%  med= -0.47%  std= 5.28
+  long & btc down: N= 108  WR= 45.4%  lift=1.11  avg= +0.25%  med= -0.38%  std= 4.83
+
+==============================================================================
+D. CLUSTER SIZE AS FALSE-SIGNAL FILTER
+==============================================================================
+
+-- cluster_size vs signed_ret_+4h_pct --
+               1: N= 256  WR= 42.6%  lift=1.05  avg= -0.02%  med= -0.27%  std= 5.33
+               2: N= 121  WR= 40.5%  lift=0.99  avg= -0.04%  med= -0.56%  std= 4.68
+               3: N=  48  WR= 37.5%  lift=0.92  avg= +0.44%  med= -0.42%  std= 3.76
+               4: N=  32  WR= 46.9%  lift=1.15  avg= -0.28%  med= -0.11%  std= 2.17
+               5: N=  10  WR= 10.0%  lift=0.25  avg= -0.69%  med= -0.60%  std= 1.61  (N<20!)
+               6: N=  12  WR= 25.0%  lift=0.61  avg= -0.39%  med= -0.41%  std= 0.76  (N<20!)
+
+-- cluster_size vs signed_ret_+1h_pct --
+               1: N= 258  WR= 45.0%  lift=1.10  avg= +0.33%  med= -0.10%  std= 6.33
+               2: N= 121  WR= 51.2%  lift=1.26  avg= +0.09%  med= +0.03%  std= 1.88
+               3: N=  48  WR= 52.1%  lift=1.28  avg= -0.05%  med= +0.04%  std= 1.65
+               4: N=  32  WR= 62.5%  lift=1.54  avg= +0.32%  med= +0.21%  std= 1.46
+               5: N=  10  WR= 70.0%  lift=1.72  avg= +0.47%  med= +0.12%  std= 0.84  (N<20!)
+               6: N=  12  WR= 66.7%  lift=1.64  avg= +0.26%  med= +0.32%  std= 0.46  (N<20!)
+
+isolated (=1) vs clustered (>=3):
+  signed_ret_+1h_pct: iso WR=45.0% (N=258) avg=+0.33  clu WR=58.8% (N=102) avg=+0.15  p=0.0588
+  signed_ret_+2h_pct: iso WR=43.4% (N=258) avg=+0.22  clu WR=44.1% (N=102) avg=+0.06  p=0.2734
+  signed_ret_+4h_pct: iso WR=42.2% (N=258) avg=-0.02  clu WR=36.3% (N=102) avg=+0.01  p=0.9068
+  signed_ret_+8h_pct: iso WR=44.2% (N=258) avg=-0.10  clu WR=30.4% (N=102) avg=-0.44  p=0.2203
+
+cluster_size X asset_class (+4h):
+     crypto_t1    iso: N=  45  WR= 46.7%  lift=1.15  avg= +0.04%  med= -0.06%  std= 1.16
+     crypto_t1 clu>=3: N=  36  WR= 22.2%  lift=0.55  avg= -0.44%  med= -0.43%  std= 1.14
+     crypto_t2    iso: N= 186  WR= 42.5%  lift=1.04  avg= +0.12%  med= -0.44%  std= 6.01
+     crypto_t2 clu>=3: N=  53  WR= 47.2%  lift=1.16  avg= +0.71%  med= -0.18%  std= 3.61
+   crypto_meme    iso: N=  24  WR= 33.3%  lift=0.82  avg= -1.32%  med= -1.48%  std= 4.44
+   crypto_meme clu>=3: N=  13  WR= 30.8%  lift=0.76  avg= -1.62%  med= -2.22%  std= 2.33
+     commodity    iso: N=   1  WR=100.0%  lift=2.46  avg= +1.78%  med= +1.78%  std=  nan
+
+==============================================================================
+E. SCORE PERCENTILE VS RAW SCORE
+==============================================================================
+
+-- score_pctile buckets vs signed_ret_+4h_pct --
+            0-25: N= 150  WR= 42.0%  lift=1.03  avg= -0.16%  med= -0.17%  std= 2.85
+           25-50: N= 123  WR= 35.0%  lift=0.86  avg= -0.27%  med= -0.64%  std= 2.84
+           50-75: N= 113  WR= 36.3%  lift=0.89  avg= -0.52%  med= -0.65%  std= 3.30
+          75-100: N=  93  WR= 51.6%  lift=1.27  avg= +1.14%  med= +0.09%  std= 8.81
+  score>=5: N= 225  WR= 42.2%  lift=1.04  avg= +0.21%  med= -0.39%  std= 6.23
+  score>=8: N=  95  WR= 46.3%  lift=1.14  avg= +0.63%  med= -0.37%  std= 8.32
+  score>=10: N=  45  WR= 55.6%  lift=1.37  avg= +0.88%  med= +0.09%  std= 9.28
+  score>=12: N=  21  WR= 57.1%  lift=1.40  avg= +2.29%  med= +0.18%  std=13.33
+
+Spearman score_pctile vs +4h: -0.0168
+Spearman score vs +4h: -0.0266
+Spearman score vs |+4h| (magnitude): 0.1812
+Spearman score_pctile vs |+4h|: 0.185
+
+==============================================================================
+F. ALREADY RUNNING VS FRESH BREAKOUT
+==============================================================================
+
+-- ticker_ret_4h_pct buckets vs signed_ret_+4h_pct --
+             neg: N=  94  WR= 44.7%  lift=1.10  avg= -0.17%  med= -0.11%  std= 2.43
+            0-3%: N= 127  WR= 36.2%  lift=0.89  avg= -0.23%  med= -0.41%  std= 1.96
+            3-8%: N= 211  WR= 40.3%  lift=0.99  avg= +0.14%  med= -0.48%  std= 5.60
+             >8%: N=  46  WR= 47.8%  lift=1.18  avg= +0.16%  med= -0.48%  std= 8.30
+
+-- ticker_ret_4h_pct buckets vs signed_ret_+1h_pct --
+             neg: N=  94  WR= 46.8%  lift=1.15  avg= -0.15%  med= -0.05%  std= 1.22
+            0-3%: N= 128  WR= 50.8%  lift=1.25  avg= +0.04%  med= +0.01%  std= 1.01
+            3-8%: N= 212  WR= 50.5%  lift=1.24  avg= +0.60%  med= +0.03%  std= 6.83
+             >8%: N=  46  WR= 45.7%  lift=1.12  avg= -0.14%  med= -0.41%  std= 4.09
+
+short alerts where ticker already up >8% (counter-trend exhaustion):
+  N=   0  WR=  nan%  lift= nan  avg=  +nan%  med=  +nan%  std=  nan
+  short & ticker down >8%: N=  15  WR= 46.7%  lift=1.15  avg= +0.06%  med= -0.02%  std= 4.86
+Spearman ticker_ret_4h vs +4h: -0.0522
+
+==============================================================================
+G. TIME-OF-DAY & DAY-OF-WEEK
+==============================================================================
+        Asia 00-08: N= 126  WR= 39.7%  lift=0.98  avg= -0.42%  med= -0.39%  std= 4.22
+          EU 08-13: N=  96  WR= 45.8%  lift=1.13  avg= -0.13%  med= -0.15%  std= 2.62
+      USopen 13-17: N= 122  WR= 40.2%  lift=0.99  avg= +0.02%  med= -0.40%  std= 3.27
+        USpm 17-21: N=  80  WR= 40.0%  lift=0.98  avg= +0.47%  med= -0.40%  std= 7.53
+   Overnight 21-24: N=  55  WR= 36.4%  lift=0.89  avg= +0.30%  med= -0.39%  std= 6.14
+
+per-hour (N>=10):
+
+-- alert_hour vs signed_ret_+4h_pct --
+               0: N=  14  WR= 42.9%  lift=1.05  avg= +1.61%  med= -0.21%  std= 4.75  (N<20!)
+               1: N=  22  WR= 36.4%  lift=0.89  avg= -1.89%  med= -1.08%  std= 4.30
+               2: N=  26  WR= 50.0%  lift=1.23  avg= +0.59%  med= -0.08%  std= 4.18
+               3: N=  10  WR= 40.0%  lift=0.98  avg= +1.04%  med= -0.32%  std= 3.96  (N<20!)
+               4: N=  12  WR= 33.3%  lift=0.82  avg= -0.94%  med= -0.14%  std= 4.54  (N<20!)
+               5: N=  18  WR= 33.3%  lift=0.82  avg= -1.27%  med= -1.06%  std= 2.33  (N<20!)
+               6: N=  13  WR= 30.8%  lift=0.76  avg= -2.65%  med= -2.32%  std= 3.33  (N<20!)
+               7: N=  11  WR= 45.5%  lift=1.12  avg= +0.78%  med= -0.24%  std= 5.11  (N<20!)
+               8: N=  16  WR= 37.5%  lift=0.92  avg= -0.02%  med= -0.19%  std= 2.66  (N<20!)
+               9: N=  23  WR= 39.1%  lift=0.96  avg= -0.34%  med= -0.21%  std= 2.53
+              10: N=  21  WR= 42.9%  lift=1.05  avg= -0.54%  med= -0.72%  std= 2.54
+              11: N=  15  WR= 53.3%  lift=1.31  avg= +0.59%  med= +0.42%  std= 3.24  (N<20!)
+              12: N=  21  WR= 57.1%  lift=1.40  avg= -0.07%  med= +0.19%  std= 2.42
+              13: N=  30  WR= 33.3%  lift=0.82  avg= -0.93%  med= -1.03%  std= 2.46
+              14: N=  20  WR= 50.0%  lift=1.23  avg= +0.12%  med= -0.03%  std= 3.18
+              15: N=  39  WR= 46.2%  lift=1.13  avg= +0.58%  med= -0.14%  std= 3.07
+              16: N=  33  WR= 33.3%  lift=0.82  avg= +0.17%  med= -0.71%  std= 4.04
+              17: N=  22  WR= 40.9%  lift=1.01  avg= +1.67%  med= -0.41%  std=11.99
+              18: N=  22  WR= 40.9%  lift=1.01  avg= -0.00%  med= -0.17%  std= 1.68
+              19: N=  21  WR= 23.8%  lift=0.59  avg= -0.59%  med= -1.16%  std= 4.37
+              20: N=  15  WR= 60.0%  lift=1.47  avg= +0.87%  med= +0.49%  std= 8.29  (N<20!)
+              21: N=  15  WR= 46.7%  lift=1.15  avg= +0.21%  med= -0.41%  std= 3.03  (N<20!)
+              22: N=  26  WR= 34.6%  lift=0.85  avg= -0.22%  med= -0.38%  std= 1.69
+              23: N=  14  WR= 28.6%  lift=0.70  avg= +1.36%  med= -0.52%  std=11.80  (N<20!)
+
+day of week:
+
+-- alert_dow vs signed_ret_+4h_pct --
+             Mon: N=  95  WR= 32.6%  lift=0.80  avg= +0.24%  med= -0.42%  std= 5.74
+             Tue: N=  67  WR= 40.3%  lift=0.99  avg= -0.44%  med= -0.48%  std= 3.40
+             Wed: N=  68  WR= 38.2%  lift=0.94  avg= -0.84%  med= -0.49%  std= 2.90
+             Thu: N=  63  WR= 54.0%  lift=1.33  avg= +0.73%  med= +0.28%  std= 3.67
+             Fri: N=  71  WR= 42.3%  lift=1.04  avg= +0.62%  med= -0.44%  std= 7.42
+             Sat: N=  38  WR= 28.9%  lift=0.71  avg= -0.58%  med= -0.92%  std= 4.31
+             Sun: N=  77  WR= 46.8%  lift=1.15  avg= -0.18%  med= -0.10%  std= 3.20
+
+==============================================================================
+H. REPEAT-FIRE ANALYSIS
+==============================================================================
+
+-- repeat_fire_8h vs signed_ret_+4h_pct --
+               0: N= 431  WR= 39.9%  lift=0.98  avg= -0.03%  med= -0.38%  std= 4.60
+               1: N=  48  WR= 47.9%  lift=1.18  avg= +0.11%  med= -0.63%  std= 5.88
+
+-- repeat_fire_8h vs signed_ret_+1h_pct --
+               0: N= 433  WR= 50.3%  lift=1.24  avg= +0.25%  med= +0.02%  std= 4.89
+               1: N=  48  WR= 41.7%  lift=1.02  avg= +0.11%  med= -0.11%  std= 3.51
+
+repeat_fire breakout_dist_pct means:
+  first fire: 2.14%
+  repeat:     2.43%
+p=0.8102
+
+==============================================================================
+I. VOL RATIO ANALYSIS
+==============================================================================
+
+-- vol_ratio buckets vs signed_ret_+4h_pct --
+            1-2x: N=  82  WR= 40.2%  lift=0.99  avg= +0.14%  med= -0.21%  std= 2.13
+            2-5x: N=  95  WR= 40.0%  lift=0.98  avg= -0.33%  med= -0.27%  std= 3.11
+           5-15x: N= 207  WR= 44.4%  lift=1.09  avg= +0.58%  med= -0.38%  std= 6.10
+            >15x: N=  95  WR= 33.7%  lift=0.83  avg= -1.16%  med= -1.06%  std= 4.11
+
+Spearman vol_ratio vs +4h: -0.122
+Spearman vol_ratio vs |+4h|: 0.1733
+
+vol_ratio X alpha_z (+4h):
+   vol>=7  az>=3: N= 158  WR= 44.3%  lift=1.09  avg= +0.43%  med= -0.42%  std= 7.02
+   vol>=7   az<3: N=  77  WR= 26.0%  lift=0.64  avg= -0.95%  med= -0.90%  std= 2.22
+    vol<7  az>=3: N= 112  WR= 46.4%  lift=1.14  avg= -0.00%  med= -0.07%  std= 3.68
+    vol<7   az<3: N= 132  WR= 40.2%  lift=0.99  avg= -0.03%  med= -0.22%  std= 2.77
+
+==============================================================================
+J. ASSET CLASS FAILURE MODES
+==============================================================================
+     crypto_t2: N= 328  WR= 44.2%  lift=1.09  avg= +0.24%  med= -0.37%  std= 5.50  P(>+5%)=7.3% P(<-5%)=6.1%
+     crypto_t1: N= 103  WR= 32.0%  lift=0.79  avg= -0.31%  med= -0.27%  std= 1.16  P(>+5%)=0.0% P(<-5%)=0.0%
+   crypto_meme: N=  45  WR= 31.1%  lift=0.76  avg= -1.30%  med= -1.69%  std= 3.64  P(>+5%)=4.4% P(<-5%)=8.9%
+     commodity: N=   3  WR=100.0%  lift=2.46  avg= +0.74%  med= +0.32%  std= 0.91  P(>+5%)=0.0% P(<-5%)=0.0%
+
+crypto_t2 mean=+0.242% median=-0.374% trimmed5% mean=-0.169%
+
+==============================================================================
+K. PROFIT PATH ANALYSIS
+==============================================================================
+      early win held: n=136 (28.3%) avg+4h=+3.45%
+    early loss recov: n= 57 (11.9%) avg+4h=+2.10%
+  early win reversed: n=100 (20.8%) avg+4h=-1.71%
+     consistent loss: n=175 (36.4%) avg+4h=-2.45%
+
+What predicts 'early win reversed' vs 'early win held' (feature means):
+        score_pctile: reversed=+43.262  held=+46.359  p=0.4686
+              abs_az: reversed=+3.445  held=+inf  p=0.0957
+        cluster_size: reversed=+2.160  held=+1.890  p=0.2999
+   breakout_dist_pct: reversed=+2.176  held=+2.255  p=0.3619
+           vol_ratio: reversed=+15.620  held=+9.082  p=0.2727
+   ticker_ret_4h_pct: reversed=+3.795  held=+3.485  p=0.1288
+      btc_ret_4h_pct: reversed=+0.553  held=+0.344  p=0.3564
+
+==============================================================================
+L. OUTLIER ANATOMY
+==============================================================================
+TOP 10 winners (+4h):
+ticker asset_class  score  score_pctile  alpha_z  cluster_size  breakout_dist_pct  vol_ratio structure_type  btc_ret_4h_pct  ticker_ret_4h_pct  signed_ret_+1h_pct  signed_ret_+4h_pct  signed_ret_+8h_pct
+    FF   crypto_t2 13.580          95.2   8.2479             1             0.8777     11.004      4h_and_1h          1.1128             3.9130             94.6982             53.8064             33.1022
+   MYX   crypto_t2  9.311          84.2   5.4678             2             5.1335      9.988      4h_and_1h          1.4621            20.7547              0.7813             40.7812             48.8281
+   TON   crypto_t2  7.837          78.3   6.2077             1             1.7687      9.178      4h_and_1h         -0.1311             5.2039              5.9492             18.9840             13.3690
+STABLE   crypto_t2  1.844          11.1   1.6141             1             1.7372      5.446      4h_and_1h         -0.2944             5.0666             -0.5261             18.2402              0.5745
+   AXS   crypto_t2  7.032          55.6   4.0823             1             4.0316      9.898      4h_and_1h          0.3599             5.5111              2.1061             16.0910             45.4086
+   ZEC   crypto_t2  7.669          82.6   3.8123             1             2.7757      6.096      4h_and_1h          0.0714             4.3905              8.7857             15.0710                 NaN
+  DASH   crypto_t2  8.889          87.0   6.6533             3             5.7561     14.280      4h_and_1h         -0.4862             7.8250              0.0716             14.9439             12.8193
+   SUI   crypto_t2  9.515          75.0   7.1587             3             6.3710      5.216      4h_and_1h          0.7601             6.6116              3.9168             13.0314              8.7475
+   ARC   crypto_t2  5.021          77.8   3.3775             1             3.1299      9.933      4h_and_1h         -1.3586             3.9620              3.4229             12.2367              7.0122
+   AXS   crypto_t2 13.091          88.9   7.8069             1            19.3154     65.538             4h         -0.2290            20.7921              5.1913             12.2268              4.0984
+
+BOTTOM 10 losers (+4h):
+  ticker asset_class  score  score_pctile  alpha_z  cluster_size  breakout_dist_pct  vol_ratio structure_type  btc_ret_4h_pct  ticker_ret_4h_pct  signed_ret_+1h_pct  signed_ret_+4h_pct  signed_ret_+8h_pct
+  STABLE   crypto_t2  8.089          80.0   4.5044             1             3.6160     42.289      4h_and_1h          0.7291            30.4530             -6.5866            -16.3172            -17.6081
+     MYX   crypto_t2 14.712          93.8   9.8343             1            11.0277    100.927      4h_and_1h          0.3067            66.2403             15.3183            -13.9193            -26.1599
+FARTCOIN crypto_meme  4.565          35.3   6.0496             1             2.2456      4.847      4h_and_1h         -0.3086             4.4922              4.0654            -12.7570            -16.0748
+    AVNT   crypto_t2  8.825          81.8   5.4417             1             2.0939     12.001      4h_and_1h          0.5313             7.5730             -8.6475            -10.9756            -14.7450
+    EDGE   crypto_t2 15.042          94.1  11.6952             1             6.0185     75.397      4h_and_1h         -1.6003            36.2696              1.2599            -10.2513             -7.7171
+   RIVER   crypto_t2  6.816          75.0  -5.0878             1            16.0763      5.758      4h_and_1h          0.2538           -18.5139             -1.2464             -8.6595            -13.5141
+     ARC   crypto_t2 13.749          92.3  -8.4223             1             5.1752     26.250      4h_and_1h          0.1153           -12.3340             -6.8491             -8.6116             -8.1323
+     MYX   crypto_t2  1.898           0.0   1.7464             1             3.0727      5.100      4h_and_1h         -0.1665             7.3744             -3.6604             -7.4717             -1.8868
+    DUSK   crypto_t2  6.767          87.5   4.2511             1             5.8174      2.742      4h_and_1h          0.5672            12.5284             -5.3190             -7.4569             -8.9610
+    DUSK   crypto_t2  5.744          62.5   3.8703             1             3.0336      2.328      4h_and_1h          0.0746             8.6670             -5.9925             -7.4432             -3.4094
+
+Feature means: top10 vs bottom10 vs all:
+               score: top=+8.379  bot=+8.621  all=+5.496
+        score_pctile: top=+73.570  bot=+70.230  all=+45.036
+              abs_az: top=+5.443  bot=+6.090  all=+inf
+        cluster_size: top=+1.500  bot=+1.000  all=+1.859
+   breakout_dist_pct: top=+5.090  bot=+5.818  all=+2.173
+           vol_ratio: top=+14.658  bot=+27.764  all=+12.670
+   ticker_ret_4h_pct: top=+8.403  bot=+14.275  all=+3.262
+
+Trimmed (5/95) dataset: N= 431  WR= 39.7%  lift=0.97  avg= -0.33%  med= -0.39%  std= 2.04
+Full dataset:           N= 479  WR= 40.7%  lift=1.00  avg= -0.02%  med= -0.39%  std= 4.74
+
+==============================================================================
+M. TRIPLE-STACK INTERACTION
+==============================================================================
+alpha_z>=3 & pctile>=75 & cluster=1:
+  signed_ret_+1h_pct: N=  42  WR= 52.4%  lift=1.29  avg= +2.58%  med= +0.24%  std=15.15
+  signed_ret_+2h_pct: N=  42  WR= 40.5%  lift=0.99  avg= +2.70%  med= -0.31%  std=15.07
+  signed_ret_+4h_pct: N=  42  WR= 50.0%  lift=1.23  avg= +1.12%  med= -0.01%  std=10.98
+  signed_ret_+8h_pct: N=  41  WR= 39.0%  lift=0.96  avg= -0.67%  med= -1.31%  std= 9.41
+
+stack vs rest (+4h): p=0.9168
+
+stack X asset_class (+4h):
+     crypto_t2: N=  36  WR= 44.4%  lift=1.09  avg= +1.15%  med= -1.07%  std=11.87
+     crypto_t1: N=   6  WR= 83.3%  lift=2.05  avg= +0.95%  med= +0.25%  std= 1.78
+
+stack X btc_range_expansion:
+  bre=0: N=  35  WR= 48.6%  lift=1.19  avg= +1.84%  med= -0.12%  std=11.74
+  bre=1: N=   7  WR= 57.1%  lift=1.40  avg= -2.52%  med= +0.18%  std= 5.05
+
+4th-variable search on top of triple stack (+4h):
+  +            dist<2%: N=  11  WR= 63.6%  lift=1.56  avg= +6.65%  med= +0.18%  std=16.84
+  +    ticker_ret 3-8%: N=  21  WR= 57.1%  lift=1.40  avg= +4.07%  med= +0.32%  std=13.33
+  +     direction=long: N=  34  WR= 52.9%  lift=1.30  avg= +1.75%  med= +0.14%  std=11.93
+  +             vol>=7: N=  31  WR= 48.4%  lift=1.19  avg= +1.45%  med= -0.12%  std=12.29
+  +              bre=0: N=  35  WR= 48.6%  lift=1.19  avg= +1.84%  med= -0.12%  std=11.74
+  +  EU+USopen hr 8-17: N=  13  WR= 61.5%  lift=1.51  avg= +1.09%  med= +0.18%  std= 4.67
+
+==============================================================================
+N. SYSTEMATIC INTERACTION SEARCH
+==============================================================================
+Best 2-var stacks (N>=20, by +4h avg):
+        pctile>=75 & dist<2%: N=  32  WR= 43.8%  lift=1.07  avg= +2.02%  med= -0.17%  std=10.34
+          pctile>=75 & bre=0: N=  68  WR= 52.9%  lift=1.30  avg= +1.91%  med= +0.24%  std=10.09
+             pctile>=75 & t2: N=  81  WR= 53.1%  lift=1.30  avg= +1.45%  med= +0.23%  std= 9.55
+          az>=3 & pctile>=75: N=  92  WR= 56.5%  lift=1.39  avg= +1.41%  med= +0.27%  std= 8.94
+           pctile>=75 & long: N=  82  WR= 51.2%  lift=1.26  avg= +1.34%  med= +0.08%  std= 9.36
+         pctile>=75 & vol>=7: N=  78  WR= 50.0%  lift=1.23  avg= +1.15%  med= +0.03%  std= 9.37
+        pctile>=75 & aligned: N=  78  WR= 50.0%  lift=1.23  avg= +0.93%  med= +0.03%  std= 8.90
+      pctile>=75 & cluster=1: N=  45  WR= 48.9%  lift=1.20  avg= +0.84%  med= -0.12%  std=10.67
+                  az>=3 & t2: N= 186  WR= 50.0%  lift=1.23  avg= +0.65%  med= +0.02%  std= 6.80
+              az>=3 & vol>=7: N= 158  WR= 44.3%  lift=1.09  avg= +0.43%  med= -0.42%  std= 7.02
+               az>=3 & bre=0: N= 195  WR= 44.1%  lift=1.08  avg= +0.43%  med= -0.59%  std= 6.57
+                dist<2% & t2: N= 183  WR= 43.2%  lift=1.06  avg= +0.39%  med= -0.29%  std= 5.07
+
+Best 3-var stacks (N>=20, by +4h avg):
+           pctile>=75 & dist<2% & t2: N=  20  WR= 50.0%  lift=1.23  avg= +3.54%  med= +0.21%  std=12.95
+       pctile>=75 & dist<2% & vol>=7: N=  22  WR= 40.9%  lift=1.01  avg= +2.97%  med= -0.17%  std=12.28
+        az>=3 & pctile>=75 & dist<2%: N=  27  WR= 48.1%  lift=1.18  avg= +2.60%  med= -0.02%  std=11.18
+         pctile>=75 & dist<2% & long: N=  25  WR= 36.0%  lift=0.88  avg= +2.43%  med= -1.00%  std=11.71
+          az>=3 & pctile>=75 & bre=0: N=  64  WR= 56.2%  lift=1.38  avg= +2.22%  med= +0.47%  std=10.31
+      pctile>=75 & dist<2% & aligned: N=  25  WR= 44.0%  lift=1.08  avg= +2.17%  med= -0.22%  std=11.05
+             pctile>=75 & t2 & bre=0: N=  61  WR= 52.5%  lift=1.29  avg= +2.16%  med= +0.63%  std=10.59
+           pctile>=75 & long & bre=0: N=  58  WR= 53.4%  lift=1.31  avg= +2.12%  med= +0.27%  std=10.76
+         pctile>=75 & vol>=7 & bre=0: N=  53  WR= 50.9%  lift=1.25  avg= +2.10%  med= +0.23%  std=11.11
+             az>=3 & pctile>=75 & t2: N=  74  WR= 58.1%  lift=1.43  avg= +1.83%  med= +0.55%  std= 9.90
+              pctile>=75 & long & t2: N=  66  WR= 53.0%  lift=1.30  avg= +1.75%  med= +0.21%  std=10.36
+           az>=3 & pctile>=75 & long: N=  75  WR= 56.0%  lift=1.38  avg= +1.70%  med= +0.23%  std= 9.70
+
+==============================================================================
+O. REGIME ANALYSIS
+==============================================================================
+Regime 1: BTC impulse (bre=1) vs non-impulse:
+       impulse: N= 159  WR= 39.6%  lift=0.97  avg= -0.18%  med= -0.21%  std= 2.72
+   non-impulse: N= 320  WR= 41.2%  lift=1.01  avg= +0.06%  med= -0.69%  std= 5.47
+p=0.2429
+
+Regime 4: calendar window:
+
+-- db vs signed_ret_+4h_pct --
+     apr05-may06: N= 359  WR= 40.4%  lift=0.99  avg= -0.09%  med= -0.48%  std= 5.26
+     feb25-mar23: N=  12  WR= 33.3%  lift=0.82  avg= -0.00%  med= -0.22%  std= 1.40  (N<20!)
+     may07-may09: N=  69  WR= 40.6%  lift=1.00  avg= +0.14%  med= -0.13%  std= 2.08
+     may09-may11: N=  39  WR= 46.2%  lift=1.13  avg= +0.31%  med= -0.24%  std= 3.62
+
+by ISO week (N>=10):
+
+-- week vs signed_ret_+4h_pct --
+              15: N= 105  WR= 41.9%  lift=1.03  avg= -0.04%  med= -0.27%  std= 6.14
+              16: N= 128  WR= 40.6%  lift=1.00  avg= +0.05%  med= -0.38%  std= 4.66
+              17: N=  57  WR= 40.4%  lift=0.99  avg= -0.50%  med= -0.78%  std= 5.51
+              18: N=  74  WR= 32.4%  lift=0.80  avg= -0.44%  med= -0.58%  std= 2.68
+              19: N=  84  WR= 40.5%  lift=0.99  avg= +0.27%  med= -0.28%  std= 4.24
+              20: N=  13  WR= 76.9%  lift=1.89  avg= +1.86%  med= +0.83%  std= 3.86  (N<20!)
+
+==============================================================================
+P. EXIT INTELLIGENCE
+==============================================================================
+Top quartile proxy (+4h>2%), N=79:
+  Exit A (+1h) avg: +2.64%  total: +208.9
+  Exit B (+4h) avg: +6.35%  total: +501.3
+  Exit C (+8h) avg: +5.35%  total: +412.2
+  peak horizon dist among winners: {1: 4, 2: 7, 4: 42, 8: 26}
+
+Whole dataset exit comparison (sum of signed returns):
+  exit signed_ret_+1h_pct: total=+112.2  avg=+0.233%  WR=49.5%
+  exit signed_ret_+2h_pct: total=+12.7  avg=+0.026%  WR=42.4%
+  exit signed_ret_+4h_pct: total=-9.3  avg=-0.019%  WR=40.5%
+  exit signed_ret_+8h_pct: total=-41.4  avg=-0.087%  WR=41.4%
+
+Top 20 by +4h trajectory (1h/2h/4h/8h):
+        FF 2026-04-10:  +94.7  +83.8  +53.8  +33.1  [fade]
+       MYX 2026-04-13:   +0.8   +6.5  +40.8  +48.8  [build]
+       TON 2026-05-04:   +5.9   +7.3  +19.0  +13.4  [build]
+    STABLE 2026-04-23:   -0.5   -0.4  +18.2   +0.6  [build]
+       AXS 2026-04-25:   +2.1   +4.5  +16.1  +45.4  [build]
+       ZEC 2026-05-05:   +8.8  +14.8  +15.1   +nan  [build]
+      DASH 2026-05-04:   +0.1   +7.7  +14.9  +12.8  [build]
+       SUI 2026-05-10:   +3.9   +8.6  +13.0   +8.7  [build]
+       ARC 2026-04-27:   +3.4   +8.5  +12.2   +7.0  [build]
+       AXS 2026-04-25:   +5.2  +14.1  +12.2   +4.1  [build]
+   USELESS 2026-05-11:   +4.2   +9.2  +12.0   +nan  [build]
+       SKR 2026-04-24:   -1.2   +7.7  +10.1  +16.5  [build]
+     GRASS 2026-04-23:   +1.2   +3.7   +7.9   +1.9  [build]
+       ARB 2026-05-08:   +1.9   +1.0   +7.9   +6.9  [build]
+       ENA 2026-04-17:   +2.7   +4.4   +7.3   +3.1  [build]
+       TAO 2026-04-10:   -2.1   -2.6   +7.1   +7.6  [build]
+      DASH 2026-04-10:   +6.9   +1.9   +7.1   +9.3  [build]
+      DYDX 2026-04-16:   +2.8   +0.4   +6.8  +16.4  [build]
+      WLFI 2026-04-29:   +3.5   +5.0   +6.5   +8.5  [build]
+      AAVE 2026-04-16:   -0.7   +2.3   +6.3   +5.0  [build]
+
+==============================================================================
+Q. OVERFITTING DEFENSE
+==============================================================================
+Date split: h1 2026-02-25..2026-04-19 (n=240), h2 2026-04-19..2026-05-11 (n=241)
+
+  az>=3 & pctile>=75:
+    full: N=  92  WR= 56.5%  lift=1.39  avg= +1.41%  med= +0.27%  std= 8.94
+    h1:   N=  46  WR= 54.3%  lift=1.34  avg= +1.05%  med= +0.22%  std=10.82
+    h2:   N=  46  WR= 58.7%  lift=1.44  avg= +1.76%  med= +0.40%  std= 6.67
+
+  triple stack:
+    full: N=  42  WR= 50.0%  lift=1.23  avg= +1.12%  med= -0.01%  std=10.98
+    h1:   N=  18  WR= 38.9%  lift=0.96  avg= +0.16%  med= -1.89%  std=14.16
+    h2:   N=  24  WR= 58.3%  lift=1.43  avg= +1.84%  med= +0.27%  std= 8.11
+
+  pctile>=75:
+    full: N= 101  WR= 52.5%  lift=1.29  avg= +1.11%  med= +0.18%  std= 8.60
+    h1:   N=  52  WR= 50.0%  lift=1.23  avg= +0.75%  med= -0.06%  std=10.21
+    h2:   N=  49  WR= 55.1%  lift=1.35  avg= +1.49%  med= +0.23%  std= 6.57
+
+  cluster>=5 (NEG):
+    full: N=  22  WR= 18.2%  lift=0.45  avg= -0.53%  med= -0.49%  std= 1.20
+    h1:   N=  12  WR= 25.0%  lift=0.61  avg= -0.39%  med= -0.41%  std= 0.76
+    h2:   N=  10  WR= 10.0%  lift=0.25  avg= -0.69%  med= -0.60%  std= 1.61
+
+  crypto_meme (NEG):
+    full: N=  45  WR= 31.1%  lift=0.76  avg= -1.30%  med= -1.69%  std= 3.64
+    h1:   N=  24  WR= 33.3%  lift=0.82  avg= -1.28%  med= -1.22%  std= 3.51
+    h2:   N=  21  WR= 28.6%  lift=0.70  avg= -1.32%  med= -1.73%  std= 3.88
+
+Triple-stack ticker concentration: {'AVNT': 3, 'DUSK': 2, 'WLFI': 2, 'TON': 2, 'ZEC': 2, 'FF': 2, 'TRX': 2, 'ARC': 2}
+Triple-stack top contributor to avg: 
+   {'FF': 59.7, 'ZEC': 18.8, 'TON': 17.5, 'AXS': 12.2, 'SKR': 10.1}
+  stack avg with top ticker removed: 
+    minus FF: N=  40  WR= 47.5%  lift=1.17  avg= -0.32%  med= -0.28%  std= 7.28
+    minus ZEC: N=  40  WR= 47.5%  lift=1.17  avg= +0.70%  med= -0.28%  std=11.02
+    minus TON: N=  40  WR= 50.0%  lift=1.23  avg= +0.74%  med= -0.01%  std=10.88
+
+az>=3 & pctile>=75: avg=+1.408% SE=0.932% t=1.51

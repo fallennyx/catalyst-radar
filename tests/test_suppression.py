@@ -66,8 +66,8 @@ def _alert(
     )
 
 
-_HIST_LEN = 200  # enough hours to synthesize 50 4h bars (>= 33 needed)
-_PIVOT_HOUR = 101  # inside 4h-bucket idx=25 (within the lookback-30 eligible window)
+_HIST_LEN = 200  # enough hours to synthesize 50 4h bars (>= 22 needed)
+_PIVOT_HOUR = 141  # inside 4h-bucket idx=35 (within the LB=20 eligible window)
 
 
 def _bos_history_long_break(price_above: float = 105.0):

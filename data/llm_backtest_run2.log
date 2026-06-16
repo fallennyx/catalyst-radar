@@ -1,0 +1,41 @@
+[cache] retrying 139 previously-errored pairs
+[plan] 482 alerts | 408 (ticker,date) pairs | 139 to call | 269 cached | est $2.78
+[grok] 10/139  spent $0.18
+[grok] 20/139  spent $0.37
+[grok] 30/139  spent $0.53
+[grok] 40/139  spent $0.76
+[grok] 50/139  spent $0.97
+[grok] 60/139  spent $1.18
+[grok] 70/139  spent $1.36
+[grok] 80/139  spent $1.58
+[grok] 90/139  spent $1.79
+[grok] 100/139  spent $2.02
+[grok] 110/139  spent $2.21
+[grok] 120/139  spent $2.41
+[grok] 130/139  spent $2.62
+[grok] 139/139  spent $2.80
+[cost] this run: $2.80
+[out] wrote data/alert_backtest_llm.csv
+
+======================================================================
+LLM (Grok x_search) DIRECTION vs BOS — does disagreement predict failure?
+======================================================================
+
+LLM direction distribution: {'long': 236, 'neutral': 220, 'short': 26}
+
+Alerts where Grok took a directional stance: 262 (agree=216, conflict=46)
+
++4h forward return by LLM/BOS agreement:
+            AGREE (llm==bos): N=215  WR4= 40.0%  avg4= -0.20%  med4= -0.55%
+         CONFLICT (llm!=bos): N= 46  WR4= 39.1%  avg4= -0.71%  med4= -0.15%
+  Mann-Whitney agree vs conflict (+4h): p=0.9340
+
++1h forward return by agreement (engine's real signal horizon):
+                       AGREE: N=215  WR4= 50.7%  avg4= +0.11%  med4= +0.02%
+                    CONFLICT: N= 46  WR4= 43.5%  avg4= -0.32%  med4= -0.17%
+
+reference:
+    Grok neutral/no-catalyst: N=218  WR4= 41.7%  avg4= +0.30%  med4= -0.37%
+                  ALL alerts: N=479  WR4= 40.7%  avg4= -0.02%  med4= -0.39%
+
+NOTE: Grok x_search depth on micro-cap perps is the binding limit; treat 'neutral' as 'no X catalyst found'. Conflict N is what matters.

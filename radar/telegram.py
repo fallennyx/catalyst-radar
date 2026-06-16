@@ -278,6 +278,15 @@ def send_bos_alert(
     price = float(getattr(market, "price", 0.0) or 0.0)
     pct_24h = float(getattr(market, "pct_24h", 0.0) or 0.0)
 
+    # Structure-type badge: shows which BOS gate (4h / 1h / 4h+1h) confirmed.
+    structure_type = metadata.get("structure_type") if isinstance(metadata, dict) else None
+    if structure_type == "4h_and_1h":
+        structure_badge = " `[4h+1h]`"
+    elif structure_type in ("4h", "1h"):
+        structure_badge = f" `[{structure_type}]`"
+    else:
+        structure_badge = ""
+
     # ---- TP/SL line — flat, scannable. ----
     if plan is not None and direction in ("long", "short"):
         entry = float(getattr(plan, "entry", 0.0) or 0.0)
@@ -303,7 +312,7 @@ def send_bos_alert(
     trust_block = ("\n" + " · ".join(trust_notes)) if trust_notes else ""
 
     body = (
-        f"{tier_badge} — *{ticker}*\n"
+        f"{tier_badge}{structure_badge} — *{ticker}*\n"
         f"Price ${_fmt_price(price)} ({pct_24h:+.2f}%){trust_block}"
         f"{plan_line}\n\n"
         f"{_md_escape(thesis)}"

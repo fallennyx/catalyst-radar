@@ -82,6 +82,14 @@ GROQ_MAX_TOKENS = 1024
 GROQ_TEMPERATURE = 0.0
 GROQ_HTTP_TIMEOUT = 30
 
+# Grok (xAI) — OpenAI-compatible REST API. Used for the LLM-vs-BOS direction
+# backtest (scripts/llm_direction_backtest.py). Reads GROK_API_KEY.
+GROK_MODEL = "grok-4.3"
+GROK_BASE_URL = "https://api.x.ai/v1"
+GROK_MAX_TOKENS = 1024
+GROK_TEMPERATURE = 0.0
+GROK_HTTP_TIMEOUT = 60
+
 # ---- Stage 2 — full-context reasoner (predictor.py) ----
 # Runs only on candidates that survive the suppression chain. Sees price
 # history, indicators, BTC context, classifier output, news, prior alerts.
@@ -197,20 +205,20 @@ BOS_15M_HISTORY_BARS = 200          # backfill target ≈ 50h of 15m bars
 # (~250h). 200 bars fits comfortably inside both per-call caps.
 BACKFILL_15M_GAP_THRESHOLD_SEC = 900  # skip ticker if last 15m bar < this old
 
-# 4h frame — primary structural BOS reference. Synthesized from 1h bars on the
-# fly (UTC-aligned: 00, 04, 08, 12, 16, 20).
-SWING_LOOKBACK_4H_BARS = 30         # 30 4h-bars = 5 days of structure
+# 4h frame — structural BOS reference. Synthesized from 1h bars on the fly
+# (UTC-aligned: 00, 04, 08, 12, 16, 20). Evaluated in parallel with the 1h path.
+SWING_LOOKBACK_4H_BARS = 20         # 20 4h-bars = 3.3 days of structure (was 30; tighter to catch volatile plays)
 SWING_MIN_AGE_4H_BARS = 1           # skip the in-progress 4h bar
-SWING_MIN_BARS_VALIDATION_4H = 1    # pivot must hold for >=1 4h bar (4h validation; was 2)
+SWING_MIN_BARS_VALIDATION_4H = 1    # pivot must hold for >=1 4h bar (4h validation)
 
-# 1h frame BOS — early detection path. Fires when price breaks a recent 1h
-# pivot with lower range-expansion confirmation. Lower conviction than 4h; higher
-# frequency. The 4h path always takes priority when it fires first.
+# 1h frame BOS — first-class independent gate (symmetric to 4h, 1h-native params).
+# Evaluated in parallel with 4h. Either gate firing triggers an alert; both
+# firing same-direction yields structure_type="4h_and_1h" (highest conviction).
 BOS_1H_ENABLED = True
 SWING_LOOKBACK_1H_BOS_BARS = 24       # 24 1h bars = 1 day of 1h structure
 SWING_MIN_AGE_1H_BOS_BARS = 1         # skip the in-progress 1h bar
-SWING_MIN_BARS_VALIDATION_1H = 2      # pivot must hold for >=2 1h bars (2h validation)
-RANGE_EXPANSION_MULTIPLIER_1H_ENTRY = 1.2  # lower threshold for earlier detection (was 1.5)
+SWING_MIN_BARS_VALIDATION_1H = 1      # pivot must hold for >=1 1h bar (mirrors 4h symmetry)
+RANGE_EXPANSION_MULTIPLIER_1H_ENTRY = 1.5  # 1h-native range gate (matches 4h's 1h threshold)
 
 # How much 1h history to fetch for BOS evaluation. Must be wide enough to
 # synthesize SWING_LOOKBACK_4H_BARS + age + validation 4h bars (with a safety

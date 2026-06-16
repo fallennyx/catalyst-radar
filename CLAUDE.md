@@ -236,24 +236,8 @@ When starting any non-trivial change, in order:
 ## Active work / context for the agent
 
 - **Branch:** `master` (user commits manually; never auto-commit, branch, or push).
-- **In flight:** wiring `fetch_bars` CLI and `replay.load_bars` to use the live Lighter universe + auto-classification (`lighter.classify`). The CLI still uses `config.SYMBOL_TO_CLASS`; the startup backfill (runtime path) uses the live universe directly. Resume by adding `lighter.classify(ticker)` to `fetch_bars.fetch_universe`'s CSV row construction and replacing `config.SYMBOL_TO_CLASS.values()` validation in `replay.load_bars` with `config.VALID_ASSET_CLASSES`.
-- **MTF Phase 2 deferred (15-min trigger frame):** needs Binance access (geo-blocked) or paid CoinGecko. Hold until Phase 1 alert mix confirmed.
-- **Stooq evaluated, rejected** — only returns hourly data for forex/indices, not stocks/ETFs. Don't re-explore for stock coverage.
 
 ---
-
-## Anti-features (do NOT add unless explicitly approved)
-
-- Threading or multiprocessing
-- A web dashboard / HTTP API
-- Persistent message queues
-- Per-asset-class swing-lookback tuning (single `SWING_LOOKBACK_HOURS` for all)
-- Two-bar close confirmation
-- WebSocket-based live price (SDK polling is the v2 floor; WS is v3 roadmap)
-- ML model training, backtesting frameworks beyond `radar/replay.py`
-- Trade execution (the engine never places an order; alerts only)
-- Position sizing or account-fraction risk math (the trade plan is advisory only)
-- Any unlisted dependency in `pyproject.toml`
 
 (Multi-timeframe BOS confirmation was previously listed as an anti-feature;
 it's now Phase 1 of the engine — see "BOS engine" above.)

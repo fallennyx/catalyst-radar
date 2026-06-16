@@ -388,6 +388,72 @@ def _classify_groq(market: Market, news_items: list[NewsItem]) -> ClassifierResu
     return result
 
 
+# ============ Grok (xAI) call (OpenAI-compatible JSON mode) ============
+
+def _classify_grok(market: Market, news_items: list[NewsItem]) -> ClassifierResult | None:
+    """Call xAI Grok via OpenAI-compatible chat completions in JSON mode.
+    Mirrors _classify_groq; reads GROK_API_KEY. No SDK, no new dependency."""
+    api_key = os.environ.get("GROK_API_KEY")
+    if not api_key:
+        log.warning("GROK_API_KEY not set — classifier will return None")
+        return None
+    try:
+        import requests  # noqa: WPS433
+    except Exception as e:
+        log.warning("requests unavailable for Grok call: %s", e)
+        return None
+
+    user_prompt = _build_user_prompt(market, news_items) + "\n\n" + _GROQ_OUTPUT_SCHEMA_BLOCK
+    url = f"{config.GROK_BASE_URL}/chat/completions"
+    headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
+    body = {
+        "model": config.GROK_MODEL,
+        "messages": [
+            {"role": "system", "content": _SYSTEM_PROMPT},
+            {"role": "user", "content": user_prompt},
+        ],
+        "temperature": config.GROK_TEMPERATURE,
+        "max_tokens": config.GROK_MAX_TOKENS,
+        "response_format": {"type": "json_object"},
+    }
+
+    try:
+        r = requests.post(url, headers=headers, json=body, timeout=config.GROK_HTTP_TIMEOUT)
+    except Exception as e:
+        log.warning("Grok classifier call failed for %s: %s", market.ticker, e)
+        return None
+    if r.status_code != 200:
+        log.warning("Grok classifier returned %d for %s: %s",
+                    r.status_code, market.ticker, r.text[:200])
+        return None
+    try:
+        payload = r.json()
+    except ValueError:
+        log.warning("Grok classifier returned non-JSON envelope for %s", market.ticker)
+        return None
+
+    try:
+        content = (payload.get("choices") or [{}])[0].get("message", {}).get("content", "")
+    except (AttributeError, IndexError, TypeError):
+        content = ""
+    args = _parse_classifier_json(content)
+    if args is None:
+        log.warning("Grok classifier: could not parse JSON content for %s", market.ticker)
+        return None
+
+    try:
+        result = ClassifierResult(**args)
+    except ValidationError as e:
+        log.warning("Grok classifier: pydantic validation failed for %s: %s", market.ticker, e)
+        return None
+
+    corpus = _build_news_corpus(news_items)
+    if not _validate_quotes(result.evidence_quotes, corpus):
+        log.info("Grok classifier: dropped %s — fabricated evidence quote", market.ticker)
+        return None
+    return result
+
+
 # ============ Gemini call (REST, no SDK) ============
 
 # Mirror of CLASSIFY_TOOL into Gemini's function-declaration schema. Gemini
@@ -548,6 +614,8 @@ def classify(market: Market, news_items: list[NewsItem]) -> ClassifierResult | N
 
     # Route by configured provider. Groq (Llama 3.3 70B) is the current default;
     # Gemini and Anthropic Haiku are kept for fallback / replay.
+    if config.LLM_PROVIDER == "grok":
+        return _classify_grok(market, news_items)
     if config.LLM_PROVIDER == "groq":
         return _classify_groq(market, news_items)
     if config.LLM_PROVIDER == "gemini":

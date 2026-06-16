@@ -188,7 +188,7 @@ def test_find_swing_high_insufficient_history():
 
 def _bars_with_4h_pivot_high(
     n_hours: int = 200,
-    pivot_4h_idx: int = 25,
+    pivot_4h_idx: int = 35,
     pivot_high: float = 100.0,
     base_high: float = 92.0,
     base_low: float = 90.0,
@@ -196,8 +196,8 @@ def _bars_with_4h_pivot_high(
     """Build an N-hour history where one 4h bucket has an elevated high.
 
     `pivot_4h_idx` is the 4h-bucket index (0-based); the pivot bar is placed
-    inside that bucket. With n_hours=200 that's 50 4h-buckets — plenty for
-    SWING_LOOKBACK_4H_BARS=30 + age=1 + validation=2.
+    inside that bucket. With n_hours=200 that's 50 4h-buckets. Default 35
+    keeps the pivot inside SWING_LOOKBACK_4H_BARS=20 window (buckets 28-48).
     """
     bars: list[Bar] = []
     pivot_hour_idx = pivot_4h_idx * 4 + 1  # second hour of the bucket

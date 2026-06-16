@@ -1,0 +1,67 @@
+[plan] 482 alerts | 408 (ticker,date) pairs | 408 to call | 0 cached | est $8.16
+[grok] 10/408  spent $0.18
+[grok] 20/408  spent $0.37
+[grok] 30/408  spent $0.56
+[grok] 40/408  spent $0.78
+[grok] 50/408  spent $1.00
+[grok] 60/408  spent $1.18
+[grok] 70/408  spent $1.36
+[grok] 80/408  spent $1.57
+[grok] 90/408  spent $1.76
+[grok] 100/408  spent $1.97
+[grok] 110/408  spent $2.18
+[grok] 120/408  spent $2.37
+[grok] 130/408  spent $2.61
+[grok] 140/408  spent $2.85
+[grok] 150/408  spent $3.08
+[grok] 160/408  spent $3.29
+[grok] 170/408  spent $3.49
+[grok] 180/408  spent $3.69
+[grok] 190/408  spent $3.87
+[grok] 200/408  spent $4.06
+[grok] 210/408  spent $4.28
+[grok] 220/408  spent $4.46
+[grok] 230/408  spent $4.67
+[grok] 240/408  spent $4.85
+[grok] 250/408  spent $5.02
+[grok] 260/408  spent $5.23
+[grok] 270/408  spent $5.31
+[grok] 280/408  spent $5.35
+[grok] 290/408  spent $5.38
+[grok] 300/408  spent $5.38
+[grok] 310/408  spent $5.38
+[grok] 320/408  spent $5.39
+[grok] 330/408  spent $5.39
+[grok] 340/408  spent $5.39
+[grok] 350/408  spent $5.39
+[grok] 360/408  spent $5.39
+[grok] 370/408  spent $5.39
+[grok] 380/408  spent $5.39
+[grok] 390/408  spent $5.39
+[grok] 400/408  spent $5.39
+[grok] 408/408  spent $5.42
+[cost] this run: $5.42
+[out] wrote data/alert_backtest_llm.csv
+
+======================================================================
+LLM (Grok x_search) DIRECTION vs BOS — does disagreement predict failure?
+======================================================================
+
+LLM direction distribution: {'error': 166, 'long': 152, 'neutral': 150, 'short': 14}
+
+Alerts where Grok took a directional stance: 166 (agree=139, conflict=27)
+
++4h forward return by LLM/BOS agreement:
+            AGREE (llm==bos): N=139  WR4= 39.6%  avg4= -0.54%  med4= -0.73%
+         CONFLICT (llm!=bos): N= 27  WR4= 44.4%  avg4= -0.68%  med4= -0.15%
+  Mann-Whitney agree vs conflict (+4h): p=0.6633
+
++1h forward return by agreement (engine's real signal horizon):
+                       AGREE: N=139  WR4= 47.5%  avg4= -0.05%  med4= -0.08%
+                    CONFLICT: N= 27  WR4= 29.6%  avg4= -0.60%  med4= -0.56%
+
+reference:
+    Grok neutral/no-catalyst: N=150  WR4= 41.3%  avg4= +0.39%  med4= -0.33%
+                  ALL alerts: N=479  WR4= 40.7%  avg4= -0.02%  med4= -0.39%
+
+NOTE: Grok x_search depth on micro-cap perps is the binding limit; treat 'neutral' as 'no X catalyst found'. Conflict N is what matters.

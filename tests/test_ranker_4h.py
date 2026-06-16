@@ -78,11 +78,11 @@ def test_synthesize_4h_bars_aligned_to_utc():
 # ============================================================================
 
 def test_find_swing_high_on_4h_bars():
-    """A clear pivot at 4h-bucket idx 25 with all subsequent buckets lower."""
-    # 200 1h bars → 50 4h bars; pivot at hour 101 (bucket 25)
+    """A clear pivot at 4h-bucket idx 35 with all subsequent buckets lower."""
+    # 200 1h bars → 50 4h bars; pivot at hour 141 (bucket 35) — inside LB=20 window.
     bars_1h: list[Bar] = []
     for i in range(200):
-        if i == 101:
+        if i == 141:
             bars_1h.append(_bar(ts=i * 3600, high=100.0, low=99.0))
         else:
             bars_1h.append(_bar(ts=i * 3600, high=92.0, low=90.0))
@@ -107,11 +107,11 @@ def _hist_with_4h_pivot_and_breakout(
     in_progress_high: float = 103.0,
     in_progress_low: float = 98.0,
 ) -> list[Bar]:
-    """200-hour history; 4h pivot at bucket 25; in-progress 1h bar wide-range
-    + price above pivot."""
+    """200-hour history; 4h pivot at bucket 35; in-progress 1h bar wide-range
+    + price above pivot. Bucket 35 sits inside SWING_LOOKBACK_4H_BARS=20 window."""
     bars: list[Bar] = []
     for i in range(200):
-        if i == 101:
+        if i == 141:
             bars.append(_bar(ts=i * 3600, high=pivot_high, low=pivot_high - 1.0))
         else:
             bars.append(_bar(ts=i * 3600, high=92.0, low=90.0))
@@ -135,10 +135,11 @@ def test_has_breakout_structure_long_break_uses_4h_pivot():
 
 
 def test_has_breakout_structure_no_break_when_4h_history_too_short(monkeypatch):
-    """4h path requires 33+ 4h-bars; with 1h path disabled, 100h is insufficient."""
+    """4h path requires LB(20)+age(1)+validation(1)=22 4h-bars; with 1h path
+    disabled, 60 1h-bars (=15 4h-bars) is insufficient."""
     monkeypatch.setattr(config, "BOS_1H_ENABLED", False)
-    bars = [_bar(ts=i * 3600, high=92.0, low=90.0) for i in range(100)]
-    bars[-1] = _bar(ts=99 * 3600, open_=90.0, high=110.0, low=88.0, close=109.0)
+    bars = [_bar(ts=i * 3600, high=92.0, low=90.0) for i in range(60)]
+    bars[-1] = _bar(ts=59 * 3600, open_=90.0, high=110.0, low=88.0, close=109.0)
     market = Market(ticker="X", asset_class="crypto_t1")
     broke, _, _, _ = ranker.has_breakout_structure(market, bars, current_price=109.0)
     assert broke is False
@@ -148,8 +149,8 @@ def test_has_breakout_structure_short_break_uses_4h_pivot_low():
     """4h pivot LOW at 100 (not high); in-progress 1h bar breaks below."""
     bars: list[Bar] = []
     for i in range(200):
-        if i == 101:
-            # the pivot bar has a notable LOW
+        if i == 141:
+            # the pivot bar has a notable LOW (inside LB=20 window)
             bars.append(_bar(ts=i * 3600, high=151.0, low=100.0))
         else:
             bars.append(_bar(ts=i * 3600, high=160.0, low=158.0))
@@ -195,10 +196,10 @@ def _hist_with_volumes(
     median_volume: float,
     pivot_high: float = 100.0,
 ) -> list[Bar]:
-    """200h history with consistent volume + a 4h pivot at bucket 25."""
+    """200h history with consistent volume + a 4h pivot at bucket 35 (inside LB=20)."""
     bars: list[Bar] = []
     for i in range(200):
-        if i == 101:
+        if i == 141:
             bars.append(_vol_bar(ts=i * 3600, high=pivot_high, low=pivot_high - 1.0,
                                  close=pivot_high - 0.5, volume=median_volume))
         else:
@@ -263,9 +264,10 @@ def test_htf_trend_blocks_long_against_downtrend(monkeypatch):
     monkeypatch.setattr(config, "REQUIRE_HTF_TREND_ALIGNMENT", True)
     monkeypatch.setattr(config, "HTF_TREND_LOOKBACK_HOURS", 168)
     bars: list[Bar] = []
-    # Make most of the recent 7 days close at 200, well above the breakout price (~103)
+    # Make most of the recent 7 days close at 200, well above the breakout price (~103).
+    # The pivot is overwritten downstream at i=141 (bucket 35, inside LB=20).
     for i in range(200):
-        if i == 101:
+        if i == 141:
             bars.append(_vol_bar(ts=i * 3600, high=100.0, low=99.0, close=99.5, volume=0.0))
         elif i >= 200 - 168:
             bars.append(_vol_bar(ts=i * 3600, high=210.0, low=190.0, close=200.0, volume=0.0))
@@ -311,13 +313,13 @@ def test_compute_atr_basic():
 
 def test_precompute_references_returns_4h_levels():
     """Watchlist refs come from the 4h frame now."""
-    # 200-hour history with 4h-pivot high at bucket 25 (=100.0) and
-    # 4h-pivot low at bucket 30 (=85.0).
+    # 200-hour history with 4h-pivot high at bucket 35 (=100.0) and
+    # 4h-pivot low at bucket 40 (=85.0). Both inside SWING_LOOKBACK_4H_BARS=20.
     bars: list[Bar] = []
     for i in range(200):
-        if i == 101:
+        if i == 141:
             bars.append(_bar(ts=i * 3600, high=100.0, low=99.0))
-        elif i == 121:
+        elif i == 161:
             bars.append(_bar(ts=i * 3600, high=87.0, low=85.0))
         else:
             bars.append(_bar(ts=i * 3600, high=92.0, low=90.0))

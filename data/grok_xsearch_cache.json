@@ -1,0 +1,2858 @@
+{
+  "BTC:2026-02-25": {
+    "direction": "neutral",
+    "confidence": 0.5,
+    "catalyst": "none",
+    "x_calls": 2,
+    "cost": 0.0130266
+  },
+  "BTC:2026-03-16": {
+    "direction": "neutral",
+    "confidence": 0.5,
+    "catalyst": "none",
+    "x_calls": 2,
+    "cost": 0.01297535
+  },
+  "BTC:2026-03-02": {
+    "direction": "neutral",
+    "confidence": 1.0,
+    "catalyst": "none",
+    "x_calls": 2,
+    "cost": 0.0131641
+  },
+  "BTC:2026-02-28": {
+    "direction": "long",
+    "confidence": 0.7,
+    "catalyst": "BTC bullish OB whale buying",
+    "x_calls": 4,
+    "cost": 0.0286622
+  },
+  "BTC:2026-03-07": {
+    "direction": "long",
+    "confidence": 0.7,
+    "catalyst": "Banks green light tokenized assets",
+    "x_calls": 2,
+    "cost": 0.01632685
+  },
+  "BTC:2026-03-10": {
+    "direction": "neutral",
+    "confidence": 0.8,
+    "catalyst": "none",
+    "x_calls": 4,
+    "cost": 0.0288941
+  },
+  "BTC:2026-03-22": {
+    "direction": "neutral",
+    "confidence": 0.9,
+    "catalyst": "none",
+    "x_calls": 2,
+    "cost": 0.0134966
+  },
+  "BTC:2026-03-19": {
+    "direction": "neutral",
+    "confidence": 0.8,
+    "catalyst": "none",
+    "x_calls": 2,
+    "cost": 0.0191331
+  },
+  "BTC:2026-03-18": {
+    "direction": "long",
+    "confidence": 0.75,
+    "catalyst": "Gold ATH & SEC news spark BTC rally",
+    "x_calls": 2,
+    "cost": 0.01610965
+  },
+  "BCH:2026-04-05": {
+    "direction": "neutral",
+    "confidence": 0.7,
+    "catalyst": "none",
+    "x_calls": 2,
+    "cost": 0.0155391
+  },
+  "RESOLV:2026-04-05": {
+    "direction": "neutral",
+    "confidence": 0.9,
+    "catalyst": "none",
+    "x_calls": 3,
+    "cost": 0.02439855
+  },
+  "BTC:2026-03-23": {
+    "direction": "neutral",
+    "confidence": 1.0,
+    "catalyst": "none",
+    "x_calls": 3,
+    "cost": 0.0209337
+  },
+  "FOGO:2026-04-05": {
+    "direction": "long",
+    "confidence": 0.8,
+    "catalyst": "Binance/Bybit volume spikes + StoryFire growth",
+    "x_calls": 3,
+    "cost": 0.0241041
+  },
+  "ZRO:2026-04-05": {
+    "direction": "long",
+    "confidence": 0.65,
+    "catalyst": "Underrated project mentions",
+    "x_calls": 2,
+    "cost": 0.01700035
+  },
+  "1000BONK:2026-04-05": {
+    "direction": "long",
+    "confidence": 0.8,
+    "catalyst": "Binance futures 532% profit hit",
+    "x_calls": 2,
+    "cost": 0.0154241
+  },
+  "MON:2026-04-06": {
+    "direction": "long",
+    "confidence": 0.8,
+    "catalyst": "bullish breakout and longs taken",
+    "x_calls": 2,
+    "cost": 0.01583535
+  },
+  "1000PEPE:2026-04-06": {
+    "direction": "short",
+    "confidence": 0.65,
+    "catalyst": "bearish momentum + whale shorts",
+    "x_calls": 2,
+    "cost": 0.01946535
+  },
+  "AVAX:2026-04-06": {
+    "direction": "neutral",
+    "confidence": 0.9,
+    "catalyst": "none",
+    "x_calls": 3,
+    "cost": 0.0210257
+  },
+  "WIF:2026-04-06": {
+    "direction": "neutral",
+    "confidence": 1.0,
+    "catalyst": "none",
+    "x_calls": 3,
+    "cost": 0.0182566
+  },
+  "BTC:2026-04-06": {
+    "direction": "neutral",
+    "confidence": 1.0,
+    "catalyst": "none",
+    "x_calls": 3,
+    "cost": 0.02122685
+  },
+  "GRASS:2026-04-06": {
+    "direction": "long",
+    "confidence": 0.7,
+    "catalyst": "Epoch 18 live, airdrop farming",
+    "x_calls": 2,
+    "cost": 0.01495285
+  },
+  "ICP:2026-04-06": {
+    "direction": "neutral",
+    "confidence": 0.8,
+    "catalyst": "none",
+    "x_calls": 2,
+    "cost": 0.01469785
+  },
+  "FIL:2026-04-06": {
+    "direction": "long",
+    "confidence": 0.7,
+    "catalyst": "Buy signals, 25x bullish prediction",
+    "x_calls": 5,
+    "cost": 0.0390905
+  },
+  "AVNT:2026-04-06": {
+    "direction": "long",
+    "confidence": 0.7,
+    "catalyst": "Bullish posts predict 20-30% gain",
+    "x_calls": 2,
+    "cost": 0.0140416
+  },
+  "SYRUP:2026-04-06": {
+    "direction": "long",
+    "confidence": 0.7,
+    "catalyst": "Monthly buybacks + high vault utilization",
+    "x_calls": 2,
+    "cost": 0.0162841
+  },
+  "SKY:2026-04-06": {
+    "direction": "neutral",
+    "confidence": 0.7,
+    "catalyst": "none",
+    "x_calls": 2,
+    "cost": 0.0164191
+  },
+  "LIT:2026-04-06": {
+    "direction": "long",
+    "confidence": 0.75,
+    "catalyst": "Bullish on undervalued LIT as HYPE leverage play",
+    "x_calls": 2,
+    "cost": 0.01758535
+  },
+  "MORPHO:2026-04-06": {
+    "direction": "long",
+    "confidence": 0.65,
+    "catalyst": "Q1 2026 +34.9% top gainer",
+    "x_calls": 2,
+    "cost": 0.0177691
+  },
+  "CC:2026-04-07": {
+    "direction": "neutral",
+    "confidence": 0.7,
+    "catalyst": "none",
+    "x_calls": 2,
+    "cost": 0.0161191
+  },
+  "ZEC:2026-04-07": {
+    "direction": "neutral",
+    "confidence": 0.8,
+    "catalyst": "none",
+    "x_calls": 3,
+    "cost": 0.0191038
+  },
+  "IP:2026-04-06": {
+    "direction": "neutral",
+    "confidence": 0.4,
+    "catalyst": "none",
+    "x_calls": 4,
+    "cost": 0.0286219
+  },
+  "EDGE:2026-04-07": {
+    "direction": "long",
+    "confidence": 0.8,
+    "catalyst": "TGE 8d ago, ATH potential + retrodrop",
+    "x_calls": 2,
+    "cost": 0.0151866
+  },
+  "BIRB:2026-04-07": {
+    "direction": "long",
+    "confidence": 0.7,
+    "catalyst": "supply shock",
+    "x_calls": 3,
+    "cost": 0.02144385
+  },
+  "ZORA:2026-04-07": {
+    "direction": "neutral",
+    "confidence": 0.9,
+    "catalyst": "none",
+    "x_calls": 3,
+    "cost": 0.021681
+  },
+  "WLFI:2026-04-07": {
+    "direction": "neutral",
+    "confidence": 0.7,
+    "catalyst": "community requests vesting schedule announcement",
+    "x_calls": 3,
+    "cost": 0.01999115
+  },
+  "ZRO:2026-04-07": {
+    "direction": "neutral",
+    "confidence": 0.6,
+    "catalyst": "rumors of $ZRO airdrop",
+    "x_calls": 2,
+    "cost": 0.01566535
+  },
+  "AAVE:2026-04-07": {
+    "direction": "long",
+    "confidence": 0.7,
+    "catalyst": "Aave V4 strong initial deposits",
+    "x_calls": 4,
+    "cost": 0.02920315
+  },
+  "ARB:2026-04-07": {
+    "direction": "neutral",
+    "confidence": 0.8,
+    "catalyst": "none",
+    "x_calls": 3,
+    "cost": 0.0241261
+  },
+  "DASH:2026-04-07": {
+    "direction": "long",
+    "confidence": 0.75,
+    "catalyst": "Dashpay Zebec payroll streaming partnership",
+    "x_calls": 3,
+    "cost": 0.02292035
+  },
+  "DOT:2026-04-07": {
+    "direction": "neutral",
+    "confidence": 0.9,
+    "catalyst": "none",
+    "x_calls": 3,
+    "cost": 0.01991225
+  },
+  "LINK:2026-04-07": {
+    "direction": "long",
+    "confidence": 0.85,
+    "catalyst": "Grayscale LINK ETF + Swift/Mastercard integrations",
+    "x_calls": 3,
+    "cost": 0.02336785
+  },
+  "ADA:2026-04-07": {
+    "direction": "long",
+    "confidence": 0.5,
+    "catalyst": "ISO 20022 compliance for $ADA",
+    "x_calls": 3,
+    "cost": 0.0204527
+  },
+  "DOGE:2026-04-07": {
+    "direction": "long",
+    "confidence": 0.7,
+    "catalyst": "Golden crosses signal DOGE rally",
+    "x_calls": 3,
+    "cost": 0.0243135
+  },
+  "XRP:2026-04-07": {
+    "direction": "long",
+    "confidence": 0.7,
+    "catalyst": "Clarity Act regulatory boost for XRP",
+    "x_calls": 4,
+    "cost": 0.0291892
+  },
+  "1000TOSHI:2026-04-08": {
+    "direction": "neutral",
+    "confidence": 0.9,
+    "catalyst": "none",
+    "x_calls": 3,
+    "cost": 0.02062285
+  },
+  "ARC:2026-04-08": {
+    "direction": "long",
+    "confidence": 0.8,
+    "catalyst": "Circle Arc L1 airdrop points & quantum roadmap",
+    "x_calls": 3,
+    "cost": 0.0230991
+  },
+  "AZTEC:2026-04-08": {
+    "direction": "long",
+    "confidence": 0.75,
+    "catalyst": "Mainnet active, a16z backing, ZK upgrades",
+    "x_calls": 2,
+    "cost": 0.01706785
+  },
+  "SUI:2026-04-07": {
+    "direction": "long",
+    "confidence": 0.75,
+    "catalyst": "Fib retracement & AI agents narrative",
+    "x_calls": 3,
+    "cost": 0.0256653
+  },
+  "USELESS:2026-04-08": {
+    "direction": "long",
+    "confidence": 0.75,
+    "catalyst": "Influencer mentions + 4x upside speculation",
+    "x_calls": 2,
+    "cost": 0.01846535
+  },
+  "ICP:2026-04-08": {
+    "direction": "long",
+    "confidence": 0.75,
+    "catalyst": "Mission70 proposal approved tightening supply",
+    "x_calls": 2,
+    "cost": 0.0167366
+  },
+  "HBAR:2026-04-08": {
+    "direction": "neutral",
+    "confidence": 1.0,
+    "catalyst": "none",
+    "x_calls": 2,
+    "cost": 0.01318285
+  },
+  "AERO:2026-04-08": {
+    "direction": "long",
+    "confidence": 0.7,
+    "catalyst": "Merger with Velodrome catalyst",
+    "x_calls": 3,
+    "cost": 0.02096255
+  },
+  "MON:2026-04-08": {
+    "direction": "long",
+    "confidence": 0.8,
+    "catalyst": "Monad enters top 100 on CMC",
+    "x_calls": 2,
+    "cost": 0.01923035
+  },
+  "DYDX:2026-04-08": {
+    "direction": "neutral",
+    "confidence": 0.8,
+    "catalyst": "none",
+    "x_calls": 3,
+    "cost": 0.02205925
+  },
+  "KAITO:2026-04-08": {
+    "direction": "neutral",
+    "confidence": 1.0,
+    "catalyst": "none",
+    "x_calls": 1,
+    "cost": 0.0089091
+  },
+  "DUSK:2026-04-08": {
+    "direction": "neutral",
+    "confidence": 0.8,
+    "catalyst": "none",
+    "x_calls": 2,
+    "cost": 0.0157641
+  },
+  "APEX:2026-04-08": {
+    "direction": "long",
+    "confidence": 0.65,
+    "catalyst": "bullish memecoin trending buzz",
+    "x_calls": 2,
+    "cost": 0.01484035
+  },
+  "TRUMP:2026-04-08": {
+    "direction": "long",
+    "confidence": 0.65,
+    "catalyst": "Bullish growth predictions to $20+",
+    "x_calls": 3,
+    "cost": 0.02502785
+  },
+  "FARTCOIN:2026-04-08": {
+    "direction": "long",
+    "confidence": 0.75,
+    "catalyst": "Risk-on meme rally, +20% price",
+    "x_calls": 2,
+    "cost": 0.0170566
+  },
+  "ARB:2026-04-08": {
+    "direction": "neutral",
+    "confidence": 0.7,
+    "catalyst": "none",
+    "x_calls": 3,
+    "cost": 0.02448655
+  },
+  "WLFI:2026-04-08": {
+    "direction": "neutral",
+    "confidence": 1.0,
+    "catalyst": "none",
+    "x_calls": 3,
+    "cost": 0.0224034
+  },
+  "POL:2026-04-09": {
+    "direction": "long",
+    "confidence": 0.6,
+    "catalyst": "Polygon hard fork & ecosystem momentum",
+    "x_calls": 2,
+    "cost": 0.0199416
+  },
+  "AERO:2026-04-09": {
+    "direction": "neutral",
+    "confidence": 1.0,
+    "catalyst": "none",
+    "x_calls": 2,
+    "cost": 0.0128666
+  },
+  "FF:2026-04-09": {
+    "direction": "neutral",
+    "confidence": 0.8,
+    "catalyst": "none",
+    "x_calls": 2,
+    "cost": 0.01585785
+  },
+  "ARC:2026-04-09": {
+    "direction": "long",
+    "confidence": 0.8,
+    "catalyst": "Airdrop guide + leads AI agents mcap",
+    "x_calls": 2,
+    "cost": 0.01833035
+  },
+  "MORPHO:2026-04-09": {
+    "direction": "long",
+    "confidence": 0.85,
+    "catalyst": "Morpho Agents beta launch + $4.3B TVL",
+    "x_calls": 3,
+    "cost": 0.0222141
+  },
+  "ZEC:2026-04-09": {
+    "direction": "neutral",
+    "confidence": 0.9,
+    "catalyst": "none",
+    "x_calls": 3,
+    "cost": 0.0184916
+  },
+  "TON:2026-04-09": {
+    "direction": "short",
+    "confidence": 0.7,
+    "catalyst": "Arkham ditches support for $TON",
+    "x_calls": 2,
+    "cost": 0.01494535
+  },
+  "BTC:2026-04-09": {
+    "direction": "long",
+    "confidence": 0.75,
+    "catalyst": "Institutional buying, ETF launch, bullish breakout",
+    "x_calls": 2,
+    "cost": 0.0175991
+  },
+  "VVV:2026-04-09": {
+    "direction": "neutral",
+    "confidence": 0.7,
+    "catalyst": "none",
+    "x_calls": 2,
+    "cost": 0.01861535
+  },
+  "PIPPIN:2026-04-09": {
+    "direction": "neutral",
+    "confidence": 0.9,
+    "catalyst": "none",
+    "x_calls": 4,
+    "cost": 0.02729925
+  },
+  "KAITO:2026-04-10": {
+    "direction": "neutral",
+    "confidence": 0.5,
+    "catalyst": "none",
+    "x_calls": 2,
+    "cost": 0.01312535
+  },
+  "ARB:2026-04-09": {
+    "direction": "neutral",
+    "confidence": 0.9,
+    "catalyst": "none",
+    "x_calls": 3,
+    "cost": 0.01799285
+  },
+  "DASH:2026-04-09": {
+    "direction": "neutral",
+    "confidence": 0.9,
+    "catalyst": "none",
+    "x_calls": 3,
+    "cost": 0.02282285
+  },
+  "PYTH:2026-04-09": {
+    "direction": "long",
+    "confidence": 0.8,
+    "catalyst": "Polymarket revenue fuels PYTH buybacks",
+    "x_calls": 2,
+    "cost": 0.0176141
+  },
+  "CC:2026-04-09": {
+    "direction": "neutral",
+    "confidence": 0.0,
+    "catalyst": "none",
+    "x_calls": 3,
+    "cost": 0.02042255
+  },
+  "TAO:2026-04-10": {
+    "direction": "short",
+    "confidence": 0.8,
+    "catalyst": "Covenant AI exits Bittensor",
+    "x_calls": 2,
+    "cost": 0.01819285
+  },
+  "WLFI:2026-04-10": {
+    "direction": "long",
+    "confidence": 0.8,
+    "catalyst": "Token unlock proposal + FUD debunked",
+    "x_calls": 3,
+    "cost": 0.02824785
+  },
+  "DASH:2026-04-10": {
+    "direction": "long",
+    "confidence": 0.85,
+    "catalyst": "Bullish charts, 17% gains, long targets",
+    "x_calls": 2,
+    "cost": 0.01945535
+  },
+  "ENA:2026-04-10": {
+    "direction": "long",
+    "confidence": 0.8,
+    "catalyst": "bullish EMA alignment and VWAP",
+    "x_calls": 3,
+    "cost": 0.02454995
+  },
+  "GRASS:2026-04-10": {
+    "direction": "neutral",
+    "confidence": 0.8,
+    "catalyst": "none",
+    "x_calls": 4,
+    "cost": 0.0261607
+  },
+  "ARB:2026-04-10": {
+    "direction": "long",
+    "confidence": 0.7,
+    "catalyst": "ARB price pumping on trader calls",
+    "x_calls": 2,
+    "cost": 0.01784255
+  },
+  "RIVER:2026-04-10": {
+    "direction": "neutral",
+    "confidence": 0.6,
+    "catalyst": "Competition ends April 10",
+    "x_calls": 2,
+    "cost": 0.0179138
+  },
+  "STBL:2026-04-10": {
+    "direction": "long",
+    "confidence": 0.85,
+    "catalyst": "NYSE-Securitize tokenized securities partnership",
+    "x_calls": 2,
+    "cost": 0.0167038
+  },
+  "ARC:2026-04-10": {
+    "direction": "long",
+    "confidence": 0.75,
+    "catalyst": "ARC Chain AI on-chain hype +14% pump",
+    "x_calls": 2,
+    "cost": 0.01860285
+  },
+  "NMR:2026-04-10": {
+    "direction": "long",
+    "confidence": 0.85,
+    "catalyst": "Bullish wedge breakout, 50% rally expected",
+    "x_calls": 2,
+    "cost": 0.01943035
+  },
+  "USELESS:2026-04-10": {
+    "direction": "long",
+    "confidence": 0.8,
+    "catalyst": "Bonk Guy: generational entry, multi-billions run",
+    "x_calls": 2,
+    "cost": 0.01902285
+  },
+  "BTC:2026-04-10": {
+    "direction": "neutral",
+    "confidence": 0.4,
+    "catalyst": "none",
+    "x_calls": 2,
+    "cost": 0.01540315
+  },
+  "ARB:2026-04-11": {
+    "direction": "neutral",
+    "confidence": 0.8,
+    "catalyst": "none",
+    "x_calls": 2,
+    "cost": 0.01289285
+  },
+  "FF:2026-04-10": {
+    "direction": "neutral",
+    "confidence": 1.0,
+    "catalyst": "none",
+    "x_calls": 4,
+    "cost": 0.0247858
+  },
+  "LIT:2026-04-10": {
+    "direction": "long",
+    "confidence": 0.75,
+    "catalyst": "Bullish perp DEX exposure, ETF mentions",
+    "x_calls": 2,
+    "cost": 0.0159641
+  },
+  "MNT:2026-04-10": {
+    "direction": "long",
+    "confidence": 0.7,
+    "catalyst": "Altseason 2026 price targets",
+    "x_calls": 3,
+    "cost": 0.0228761
+  },
+  "VVV:2026-04-11": {
+    "direction": "long",
+    "confidence": 0.7,
+    "catalyst": "Biggest $VVV token burn executed",
+    "x_calls": 3,
+    "cost": 0.02417195
+  },
+  "NMR:2026-04-11": {
+    "direction": "long",
+    "confidence": 0.8,
+    "catalyst": "Bullish chart analysis & promising project list",
+    "x_calls": 2,
+    "cost": 0.0168916
+  },
+  "AERO:2026-04-11": {
+    "direction": "long",
+    "confidence": 0.8,
+    "catalyst": "20.6% weekly gains, volume surge",
+    "x_calls": 2,
+    "cost": 0.0149341
+  },
+  "WLD:2026-04-11": {
+    "direction": "long",
+    "confidence": 0.8,
+    "catalyst": "43% $WLD unlock rate cut from July",
+    "x_calls": 2,
+    "cost": 0.0195541
+  },
+  "STBL:2026-04-11": {
+    "direction": "long",
+    "confidence": 0.85,
+    "catalyst": "Bullish volume spike & rocket pump",
+    "x_calls": 3,
+    "cost": 0.02543035
+  },
+  "NEAR:2026-04-11": {
+    "direction": "long",
+    "confidence": 0.7,
+    "catalyst": "Whale opens $244K $NEAR long",
+    "x_calls": 2,
+    "cost": 0.0150859
+  },
+  "TON:2026-04-11": {
+    "direction": "long",
+    "confidence": 0.85,
+    "catalyst": "TON blockchain 10x faster upgrade",
+    "x_calls": 3,
+    "cost": 0.02329045
+  },
+  "PUMP:2026-04-11": {
+    "direction": "neutral",
+    "confidence": 0.9,
+    "catalyst": "none",
+    "x_calls": 4,
+    "cost": 0.0286916
+  },
+  "BTC:2026-04-11": {
+    "direction": "neutral",
+    "confidence": 0.9,
+    "catalyst": "none",
+    "x_calls": 3,
+    "cost": 0.0207391
+  },
+  "ETH:2026-04-11": {
+    "direction": "neutral",
+    "confidence": 1.0,
+    "catalyst": "none",
+    "x_calls": 4,
+    "cost": 0.02759075
+  },
+  "DUSK:2026-04-11": {
+    "direction": "long",
+    "confidence": 0.75,
+    "catalyst": "Cup & handle + pump alerts",
+    "x_calls": 3,
+    "cost": 0.0237416
+  },
+  "PENGU:2026-04-11": {
+    "direction": "neutral",
+    "confidence": 1.0,
+    "catalyst": "none",
+    "x_calls": 2,
+    "cost": 0.01322785
+  },
+  "BCH:2026-04-12": {
+    "direction": "short",
+    "confidence": 0.6,
+    "catalyst": "bearish technicals on $BCH",
+    "x_calls": 3,
+    "cost": 0.0226966
+  },
+  "BNB:2026-04-12": {
+    "direction": "short",
+    "confidence": 0.6,
+    "catalyst": "BNB drops ~7% amid caution",
+    "x_calls": 2,
+    "cost": 0.01487535
+  },
+  "DUSK:2026-04-12": {
+    "direction": "neutral",
+    "confidence": 0.5,
+    "catalyst": "none",
+    "x_calls": 3,
+    "cost": 0.0205066
+  },
+  "ZORA:2026-04-12": {
+    "direction": "neutral",
+    "confidence": 1.0,
+    "catalyst": "none",
+    "x_calls": 3,
+    "cost": 0.01900245
+  },
+  "IP:2026-04-12": {
+    "direction": "long",
+    "confidence": 0.65,
+    "catalyst": "allocation bump to 10% for $IP holders",
+    "x_calls": 3,
+    "cost": 0.0252141
+  },
+  "SKY:2026-04-13": {
+    "direction": "neutral",
+    "confidence": 0.85,
+    "catalyst": "none",
+    "x_calls": 4,
+    "cost": 0.0261312
+  },
+  "MYX:2026-04-12": {
+    "direction": "long",
+    "confidence": 0.65,
+    "catalyst": "$MYX dip buy signals amid market heat",
+    "x_calls": 3,
+    "cost": 0.02346535
+  },
+  "APT:2026-04-12": {
+    "direction": "neutral",
+    "confidence": 0.9,
+    "catalyst": "none",
+    "x_calls": 2,
+    "cost": 0.0162462
+  },
+  "AAVE:2026-04-13": {
+    "direction": "long",
+    "confidence": 0.85,
+    "catalyst": "Aave Will Win proposal passes",
+    "x_calls": 3,
+    "cost": 0.0251716
+  },
+  "STABLE:2026-04-13": {
+    "direction": "long",
+    "confidence": 0.8,
+    "catalyst": "RWA mortgages, low MC vs high TVL",
+    "x_calls": 2,
+    "cost": 0.01738035
+  },
+  "DOT:2026-04-13": {
+    "direction": "neutral",
+    "confidence": 0.9,
+    "catalyst": "none",
+    "x_calls": 3,
+    "cost": 0.0191791
+  },
+  "RIVER:2026-04-13": {
+    "direction": "long",
+    "confidence": 0.7,
+    "catalyst": "RWA sector parabolic gains",
+    "x_calls": 3,
+    "cost": 0.01910285
+  },
+  "JTO:2026-04-13": {
+    "direction": "neutral",
+    "confidence": 0.8,
+    "catalyst": "none",
+    "x_calls": 3,
+    "cost": 0.02195285
+  },
+  "WLD:2026-04-13": {
+    "direction": "neutral",
+    "confidence": 1.0,
+    "catalyst": "none",
+    "x_calls": 3,
+    "cost": 0.01897245
+  },
+  "VVV:2026-04-13": {
+    "direction": "long",
+    "confidence": 0.7,
+    "catalyst": "Bullish $10-15 price target update",
+    "x_calls": 2,
+    "cost": 0.01445285
+  },
+  "LINK:2026-04-13": {
+    "direction": "neutral",
+    "confidence": 1.0,
+    "catalyst": "none",
+    "x_calls": 2,
+    "cost": 0.0130116
+  },
+  "BTC:2026-04-13": {
+    "direction": "neutral",
+    "confidence": 0.9,
+    "catalyst": "none",
+    "x_calls": 2,
+    "cost": 0.0144691
+  },
+  "HYPE:2026-04-13": {
+    "direction": "long",
+    "confidence": 0.7,
+    "catalyst": "Positive Hyperliquid article and gains",
+    "x_calls": 3,
+    "cost": 0.02327225
+  },
+  "LDO:2026-04-13": {
+    "direction": "neutral",
+    "confidence": 0.7,
+    "catalyst": "none",
+    "x_calls": 3,
+    "cost": 0.02286285
+  },
+  "ETH:2026-04-13": {
+    "direction": "neutral",
+    "confidence": 0.8,
+    "catalyst": "none",
+    "x_calls": 4,
+    "cost": 0.0305385
+  },
+  "MYX:2026-04-13": {
+    "direction": "neutral",
+    "confidence": 0.9,
+    "catalyst": "none",
+    "x_calls": 4,
+    "cost": 0.02624765
+  },
+  "BNB:2026-04-13": {
+    "direction": "neutral",
+    "confidence": 1.0,
+    "catalyst": "none",
+    "x_calls": 4,
+    "cost": 0.02611815
+  },
+  "USELESS:2026-04-14": {
+    "direction": "long",
+    "confidence": 0.85,
+    "catalyst": "Strong community, volume, whale buys",
+    "x_calls": 3,
+    "cost": 0.0279391
+  },
+  "CRO:2026-04-14": {
+    "direction": "long",
+    "confidence": 0.7,
+    "catalyst": "Bullish catalysts & UFC sponsorship",
+    "x_calls": 3,
+    "cost": 0.0242004
+  },
+  "FARTCOIN:2026-04-14": {
+    "direction": "neutral",
+    "confidence": 0.7,
+    "catalyst": "none",
+    "x_calls": 2,
+    "cost": 0.01866785
+  },
+  "CC:2026-04-14": {
+    "direction": "long",
+    "confidence": 0.7,
+    "catalyst": "DTCC confirms Canton Network use",
+    "x_calls": 3,
+    "cost": 0.0247616
+  },
+  "MYX:2026-04-14": {
+    "direction": "neutral",
+    "confidence": 0.8,
+    "catalyst": "none",
+    "x_calls": 5,
+    "cost": 0.0352447
+  },
+  "ZRO:2026-04-14": {
+    "direction": "long",
+    "confidence": 0.65,
+    "catalyst": "none",
+    "x_calls": 3,
+    "cost": 0.02887285
+  },
+  "BNB:2026-04-14": {
+    "direction": "long",
+    "confidence": 0.7,
+    "catalyst": "BNB Chain hits $3.54B assets",
+    "x_calls": 4,
+    "cost": 0.0259812
+  },
+  "VVV:2026-04-14": {
+    "direction": "long",
+    "confidence": 0.7,
+    "catalyst": "Market pumping, $VVV up 10%",
+    "x_calls": 2,
+    "cost": 0.0158438
+  },
+  "XRP:2026-04-14": {
+    "direction": "long",
+    "confidence": 0.85,
+    "catalyst": "XRPL volume surge, Coinbase inflows",
+    "x_calls": 3,
+    "cost": 0.02138465
+  },
+  "DOGE:2026-04-14": {
+    "direction": "neutral",
+    "confidence": 0.9,
+    "catalyst": "none",
+    "x_calls": 4,
+    "cost": 0.0290071
+  },
+  "BTC:2026-04-14": {
+    "direction": "long",
+    "confidence": 0.9,
+    "catalyst": "BTC pumps to $74k on buys/short squeeze",
+    "x_calls": 3,
+    "cost": 0.0237041
+  },
+  "AZTEC:2026-04-14": {
+    "direction": "neutral",
+    "confidence": 0.0,
+    "catalyst": "none",
+    "x_calls": 3,
+    "cost": 0.0211441
+  },
+  "EDEN:2026-04-14": {
+    "direction": "long",
+    "confidence": 0.7,
+    "catalyst": "Binance gains + ecosystem updates",
+    "x_calls": 2,
+    "cost": 0.0162891
+  },
+  "TRX:2026-04-15": {
+    "direction": "long",
+    "confidence": 0.85,
+    "catalyst": "TRON post-quantum crypto upgrade",
+    "x_calls": 2,
+    "cost": 0.01999285
+  },
+  "APT:2026-04-15": {
+    "direction": "neutral",
+    "confidence": 0.6,
+    "catalyst": "none",
+    "x_calls": 2,
+    "cost": 0.01771785
+  },
+  "AAVE:2026-04-15": {
+    "direction": "long",
+    "confidence": 0.75,
+    "catalyst": "Aave DAO approves $25M grant to Labs",
+    "x_calls": 3,
+    "cost": 0.02711595
+  },
+  "DYDX:2026-04-15": {
+    "direction": "neutral",
+    "confidence": 0.9,
+    "catalyst": "none",
+    "x_calls": 3,
+    "cost": 0.0216365
+  },
+  "STBL:2026-04-15": {
+    "direction": "long",
+    "confidence": 0.75,
+    "catalyst": "RedStone PoR partnership + RWA narrative",
+    "x_calls": 3,
+    "cost": 0.0243091
+  },
+  "LDO:2026-04-15": {
+    "direction": "neutral",
+    "confidence": 0.0,
+    "catalyst": "none",
+    "x_calls": 3,
+    "cost": 0.02211535
+  },
+  "XRP:2026-04-15": {
+    "direction": "long",
+    "confidence": 0.85,
+    "catalyst": "Rakuten/VW XRP adoption + X cashtags",
+    "x_calls": 3,
+    "cost": 0.0267066
+  },
+  "ARC:2026-04-15": {
+    "direction": "long",
+    "confidence": 0.8,
+    "catalyst": "Testnet airdrop and AI delivery hype",
+    "x_calls": 3,
+    "cost": 0.0298691
+  },
+  "APEX:2026-04-15": {
+    "direction": "long",
+    "confidence": 0.7,
+    "catalyst": "10x potential, clean chart",
+    "x_calls": 2,
+    "cost": 0.01379535
+  },
+  "KAITO:2026-04-15": {
+    "direction": "neutral",
+    "confidence": 0.9,
+    "catalyst": "none",
+    "x_calls": 3,
+    "cost": 0.0233825
+  },
+  "POPCAT:2026-04-16": {
+    "direction": "long",
+    "confidence": 0.6,
+    "catalyst": "bullish accumulation calls",
+    "x_calls": 3,
+    "cost": 0.02247255
+  },
+  "1000PEPE:2026-04-16": {
+    "direction": "neutral",
+    "confidence": 0.95,
+    "catalyst": "none",
+    "x_calls": 2,
+    "cost": 0.0177525
+  },
+  "TIA:2026-04-16": {
+    "direction": "neutral",
+    "confidence": 0.9,
+    "catalyst": "none",
+    "x_calls": 3,
+    "cost": 0.0234412
+  },
+  "TRUMP:2026-04-15": {
+    "direction": "neutral",
+    "confidence": 0.7,
+    "catalyst": "none",
+    "x_calls": 3,
+    "cost": 0.024133
+  },
+  "1000TOSHI:2026-04-16": {
+    "direction": "neutral",
+    "confidence": 0.9,
+    "catalyst": "none",
+    "x_calls": 3,
+    "cost": 0.0200391
+  },
+  "EIGEN:2026-04-16": {
+    "direction": "short",
+    "confidence": 0.8,
+    "catalyst": "Traders shorting as it bleeds out",
+    "x_calls": 3,
+    "cost": 0.0224666
+  },
+  "FIL:2026-04-16": {
+    "direction": "long",
+    "confidence": 0.7,
+    "catalyst": "Forgotten $FIL at bottom could shock next cycle",
+    "x_calls": 3,
+    "cost": 0.02194245
+  },
+  "APT:2026-04-16": {
+    "direction": "neutral",
+    "confidence": 0.9,
+    "catalyst": "none",
+    "x_calls": 2,
+    "cost": 0.0159412
+  },
+  "S:2026-04-16": {
+    "direction": "neutral",
+    "confidence": 0.9,
+    "catalyst": "none",
+    "x_calls": 3,
+    "cost": 0.02103535
+  },
+  "PIPPIN:2026-04-16": {
+    "direction": "long",
+    "confidence": 0.6,
+    "catalyst": "Buyer momentum shift on chart",
+    "x_calls": 4,
+    "cost": 0.0274079
+  },
+  "DYDX:2026-04-16": {
+    "direction": "neutral",
+    "confidence": 0.7,
+    "catalyst": "none",
+    "x_calls": 3,
+    "cost": 0.02299535
+  },
+  "STBL:2026-04-16": {
+    "direction": "long",
+    "confidence": 0.75,
+    "catalyst": "RWA narrative + altcoin/BTC rally",
+    "x_calls": 3,
+    "cost": 0.0239641
+  },
+  "LDO:2026-04-16": {
+    "direction": "long",
+    "confidence": 0.8,
+    "catalyst": "Bulls in control, accumulation before 15x",
+    "x_calls": 3,
+    "cost": 0.0221834
+  },
+  "XLM:2026-04-16": {
+    "direction": "neutral",
+    "confidence": 0.8,
+    "catalyst": "none",
+    "x_calls": 3,
+    "cost": 0.0192763
+  },
+  "ARB:2026-04-16": {
+    "direction": "neutral",
+    "confidence": 0.8,
+    "catalyst": "none",
+    "x_calls": 4,
+    "cost": 0.0271302
+  },
+  "DOT:2026-04-16": {
+    "direction": "neutral",
+    "confidence": 0.7,
+    "catalyst": "none",
+    "x_calls": 2,
+    "cost": 0.0180641
+  },
+  "AAVE:2026-04-16": {
+    "direction": "long",
+    "confidence": 0.75,
+    "catalyst": "bullish TA momentum shift +3.5% upside",
+    "x_calls": 2,
+    "cost": 0.0150216
+  },
+  "PYTH:2026-04-16": {
+    "direction": "neutral",
+    "confidence": 1.0,
+    "catalyst": "none",
+    "x_calls": 2,
+    "cost": 0.0130216
+  },
+  "ENA:2026-04-16": {
+    "direction": "neutral",
+    "confidence": 0.9,
+    "catalyst": "none",
+    "x_calls": 3,
+    "cost": 0.0207609
+  },
+  "AZTEC:2026-04-17": {
+    "direction": "long",
+    "confidence": 0.85,
+    "catalyst": "Ethereum shares Aztec Alpha launch",
+    "x_calls": 3,
+    "cost": 0.0243538
+  },
+  "BNB:2026-04-16": {
+    "direction": "long",
+    "confidence": 0.85,
+    "catalyst": "Quarterly BNB token burn",
+    "x_calls": 2,
+    "cost": 0.01876255
+  },
+  "SOL:2026-04-16": {
+    "direction": "neutral",
+    "confidence": 0.5,
+    "catalyst": "none",
+    "x_calls": 4,
+    "cost": 0.0275988
+  },
+  "ZORA:2026-04-17": {
+    "direction": "neutral",
+    "confidence": 0.9,
+    "catalyst": "none",
+    "x_calls": 2,
+    "cost": 0.01281285
+  },
+  "BERA:2026-04-17": {
+    "direction": "neutral",
+    "confidence": 0.9,
+    "catalyst": "none",
+    "x_calls": 2,
+    "cost": 0.0173766
+  },
+  "IP:2026-04-17": {
+    "direction": "long",
+    "confidence": 0.65,
+    "catalyst": "High APY + pumping on StoryProtocol $IP",
+    "x_calls": 2,
+    "cost": 0.01802535
+  },
+  "APT:2026-04-17": {
+    "direction": "long",
+    "confidence": 0.7,
+    "catalyst": "Long setups and RWA/tokenization mentions",
+    "x_calls": 2,
+    "cost": 0.0152191
+  },
+  "JUP:2026-04-17": {
+    "direction": "neutral",
+    "confidence": 0.8,
+    "catalyst": "none",
+    "x_calls": 4,
+    "cost": 0.0278548
+  },
+  "GMX:2026-04-17": {
+    "direction": "neutral",
+    "confidence": 0.7,
+    "catalyst": "none",
+    "x_calls": 3,
+    "cost": 0.02233695
+  },
+  "PENGU:2026-04-17": {
+    "direction": "neutral",
+    "confidence": 0.9,
+    "catalyst": "none",
+    "x_calls": 2,
+    "cost": 0.01469255
+  },
+  "BTC:2026-04-17": {
+    "direction": "neutral",
+    "confidence": 0.8,
+    "catalyst": "none",
+    "x_calls": 2,
+    "cost": 0.01647285
+  },
+  "PENDLE:2026-04-17": {
+    "direction": "neutral",
+    "confidence": 0.9,
+    "catalyst": "none",
+    "x_calls": 3,
+    "cost": 0.0212565
+  },
+  "AAVE:2026-04-17": {
+    "direction": "neutral",
+    "confidence": 0.8,
+    "catalyst": "none",
+    "x_calls": 3,
+    "cost": 0.0206541
+  },
+  "ARB:2026-04-17": {
+    "direction": "long",
+    "confidence": 0.7,
+    "catalyst": "bullish momentum and long setups",
+    "x_calls": 3,
+    "cost": 0.0256891
+  },
+  "LINK:2026-04-17": {
+    "direction": "neutral",
+    "confidence": 0.8,
+    "catalyst": "none",
+    "x_calls": 2,
+    "cost": 0.0157666
+  },
+  "MNT:2026-04-17": {
+    "direction": "long",
+    "confidence": 0.8,
+    "catalyst": "Printr v2 launch and xStocks on Mantle",
+    "x_calls": 2,
+    "cost": 0.01534035
+  },
+  "ETH:2026-04-17": {
+    "direction": "long",
+    "confidence": 0.8,
+    "catalyst": "Institutions buying ETH dip, expect rally",
+    "x_calls": 3,
+    "cost": 0.0210059
+  },
+  "CRO:2026-04-17": {
+    "direction": "neutral",
+    "confidence": 0.8,
+    "catalyst": "none",
+    "x_calls": 2,
+    "cost": 0.0130066
+  },
+  "XRP:2026-04-17": {
+    "direction": "long",
+    "confidence": 0.8,
+    "catalyst": "XRP ETF filings and partnerships",
+    "x_calls": 3,
+    "cost": 0.0232212
+  },
+  "SUI:2026-04-17": {
+    "direction": "neutral",
+    "confidence": 0.9,
+    "catalyst": "none",
+    "x_calls": 2,
+    "cost": 0.0134716
+  },
+  "MORPHO:2026-04-17": {
+    "direction": "long",
+    "confidence": 0.75,
+    "catalyst": "RWA tokenization listing & institutional targets",
+    "x_calls": 3,
+    "cost": 0.02322785
+  },
+  "BNB:2026-04-17": {
+    "direction": "neutral",
+    "confidence": 1.0,
+    "catalyst": "none",
+    "x_calls": 2,
+    "cost": 0.01335785
+  },
+  "ENA:2026-04-17": {
+    "direction": "long",
+    "confidence": 0.8,
+    "catalyst": "Airdrop yields & StablecoinX listing planned",
+    "x_calls": 2,
+    "cost": 0.0144591
+  },
+  "AERO:2026-04-17": {
+    "direction": "long",
+    "confidence": 0.8,
+    "catalyst": "Bullish accumulation + high APY rewards",
+    "x_calls": 2,
+    "cost": 0.01543785
+  },
+  "WLD:2026-04-17": {
+    "direction": "long",
+    "confidence": 0.8,
+    "catalyst": "World Network event w/ Sam Altman potential OpenAI collab",
+    "x_calls": 3,
+    "cost": 0.02553535
+  },
+  "AVNT:2026-04-17": {
+    "direction": "long",
+    "confidence": 0.7,
+    "catalyst": "Recent 12x pump momentum",
+    "x_calls": 2,
+    "cost": 0.0164616
+  },
+  "FOGO:2026-04-18": {
+    "direction": "long",
+    "confidence": 0.8,
+    "catalyst": "Long signals, TP hits, airdrop mentions",
+    "x_calls": 2,
+    "cost": 0.02024285
+  },
+  "AZTEC:2026-04-18": {
+    "direction": "long",
+    "confidence": 0.8,
+    "catalyst": "Bullish buy setups and accumulation",
+    "x_calls": 3,
+    "cost": 0.0208916
+  },
+  "AVNT:2026-04-18": {
+    "direction": "long",
+    "confidence": 0.7,
+    "catalyst": "Broke resistance, pump setup",
+    "x_calls": 3,
+    "cost": 0.02138785
+  },
+  "RESOLV:2026-04-18": {
+    "direction": "neutral",
+    "confidence": 0.7,
+    "catalyst": "none",
+    "x_calls": 3,
+    "cost": 0.0210091
+  },
+  "DASH:2026-04-18": {
+    "direction": "neutral",
+    "confidence": 0.8,
+    "catalyst": "none",
+    "x_calls": 3,
+    "cost": 0.0226091
+  },
+  "AAVE:2026-04-19": {
+    "direction": "neutral",
+    "confidence": 0.8,
+    "catalyst": "none",
+    "x_calls": 2,
+    "cost": 0.01329785
+  },
+  "MON:2026-04-18": {
+    "direction": "long",
+    "confidence": 0.75,
+    "catalyst": "Monad airdrop distribution to believers",
+    "x_calls": 3,
+    "cost": 0.02439755
+  },
+  "RIVER:2026-04-18": {
+    "direction": "long",
+    "confidence": 0.7,
+    "catalyst": "RiverdotInc Japan summit + ecosystem growth",
+    "x_calls": 3,
+    "cost": 0.02350535
+  },
+  "MYX:2026-04-19": {
+    "direction": "long",
+    "confidence": 0.6,
+    "catalyst": "MYX +222% as top profitable perp DEX",
+    "x_calls": 3,
+    "cost": 0.0232791
+  },
+  "ZRO:2026-04-19": {
+    "direction": "short",
+    "confidence": 0.8,
+    "catalyst": "KelpDAO exploit and Alameda ZRO dump",
+    "x_calls": 2,
+    "cost": 0.01670035
+  },
+  "EDGE:2026-04-19": {
+    "direction": "neutral",
+    "confidence": 0.8,
+    "catalyst": "none",
+    "x_calls": 2,
+    "cost": 0.01706785
+  },
+  "TRX:2026-04-19": {
+    "direction": "long",
+    "confidence": 0.8,
+    "catalyst": "TRX listed on Binance US",
+    "x_calls": 2,
+    "cost": 0.01605285
+  },
+  "RIVER:2026-04-19": {
+    "direction": "neutral",
+    "confidence": 0.6,
+    "catalyst": "none",
+    "x_calls": 4,
+    "cost": 0.02982975
+  },
+  "APEX:2026-04-19": {
+    "direction": "neutral",
+    "confidence": 0.8,
+    "catalyst": "none",
+    "x_calls": 3,
+    "cost": 0.02277925
+  },
+  "HYPE:2026-04-19": {
+    "direction": "long",
+    "confidence": 0.8,
+    "catalyst": "HIP4 binary options launch",
+    "x_calls": 3,
+    "cost": 0.0211866
+  },
+  "MNT:2026-04-19": {
+    "direction": "neutral",
+    "confidence": 0.8,
+    "catalyst": "none",
+    "x_calls": 3,
+    "cost": 0.0185766
+  },
+  "ZEC:2026-04-19": {
+    "direction": "neutral",
+    "confidence": 0.8,
+    "catalyst": "none",
+    "x_calls": 2,
+    "cost": 0.01462535
+  },
+  "GRASS:2026-04-19": {
+    "direction": "neutral",
+    "confidence": 0.8,
+    "catalyst": "none",
+    "x_calls": 4,
+    "cost": 0.02848855
+  },
+  "CC:2026-04-20": {
+    "direction": "neutral",
+    "confidence": 1.0,
+    "catalyst": "none",
+    "x_calls": 2,
+    "cost": 0.0135291
+  },
+  "RIVER:2026-04-20": {
+    "direction": "short",
+    "confidence": 0.6,
+    "catalyst": "Analyst short call, single digits hit",
+    "x_calls": 2,
+    "cost": 0.0197966
+  },
+  "SKY:2026-04-20": {
+    "direction": "long",
+    "confidence": 0.7,
+    "catalyst": "Staking rewards hiked to 8.44%",
+    "x_calls": 3,
+    "cost": 0.0244216
+  },
+  "AAVE:2026-04-20": {
+    "direction": "short",
+    "confidence": 0.85,
+    "catalyst": "Kelp DAO hack causes $196M Aave bad debt",
+    "x_calls": 2,
+    "cost": 0.0160541
+  },
+  "XMR:2026-04-21": {
+    "direction": "long",
+    "confidence": 0.8,
+    "catalyst": "Bullish charts, long holders, privacy hype",
+    "x_calls": 2,
+    "cost": 0.0162366
+  },
+  "STABLE:2026-04-21": {
+    "direction": "neutral",
+    "confidence": 0.9,
+    "catalyst": "none",
+    "x_calls": 3,
+    "cost": 0.01870035
+  },
+  "GRASS:2026-04-22": {
+    "direction": "neutral",
+    "confidence": 0.9,
+    "catalyst": "none",
+    "x_calls": 2,
+    "cost": 0.01274785
+  },
+  "XLM:2026-04-21": {
+    "direction": "neutral",
+    "confidence": 1.0,
+    "catalyst": "none",
+    "x_calls": 3,
+    "cost": 0.0190309
+  },
+  "JTO:2026-04-22": {
+    "direction": "neutral",
+    "confidence": 1.0,
+    "catalyst": "none",
+    "x_calls": 4,
+    "cost": 0.03135155
+  },
+  "SEI:2026-04-22": {
+    "direction": "neutral",
+    "confidence": 0.8,
+    "catalyst": "none",
+    "x_calls": 4,
+    "cost": 0.02705645
+  },
+  "BCH:2026-04-22": {
+    "direction": "long",
+    "confidence": 0.75,
+    "catalyst": "bullish long setups and higher targets",
+    "x_calls": 3,
+    "cost": 0.0228091
+  },
+  "BTC:2026-04-22": {
+    "direction": "neutral",
+    "confidence": 0.9,
+    "catalyst": "none",
+    "x_calls": 3,
+    "cost": 0.01854465
+  },
+  "SKY:2026-04-22": {
+    "direction": "long",
+    "confidence": 0.85,
+    "catalyst": "Buybacks, Tether investment, rewards program",
+    "x_calls": 2,
+    "cost": 0.0189166
+  },
+  "PENGU:2026-04-22": {
+    "direction": "long",
+    "confidence": 0.7,
+    "catalyst": "none",
+    "x_calls": 2,
+    "cost": 0.01533785
+  },
+  "STABLE:2026-04-23": {
+    "direction": "neutral",
+    "confidence": 0.6,
+    "catalyst": "none",
+    "x_calls": 2,
+    "cost": 0.0142016
+  },
+  "RESOLV:2026-04-23": {
+    "direction": "neutral",
+    "confidence": 0.6,
+    "catalyst": "none",
+    "x_calls": 2,
+    "cost": 0.01503785
+  },
+  "AERO:2026-04-23": {
+    "direction": "long",
+    "confidence": 0.85,
+    "catalyst": "Aerodrome v3 July launch + audits",
+    "x_calls": 3,
+    "cost": 0.02382285
+  },
+  "BNB:2026-04-22": {
+    "direction": "long",
+    "confidence": 0.7,
+    "catalyst": "BNB ecosystem memes & charts bullish",
+    "x_calls": 2,
+    "cost": 0.01750255
+  },
+  "DOT:2026-04-23": {
+    "direction": "neutral",
+    "confidence": 0.9,
+    "catalyst": "none",
+    "x_calls": 2,
+    "cost": 0.01292505
+  },
+  "NMR:2026-04-23": {
+    "direction": "long",
+    "confidence": 0.8,
+    "catalyst": "Bullish chart analyses and price targets",
+    "x_calls": 4,
+    "cost": 0.02773245
+  },
+  "ZEC:2026-04-23": {
+    "direction": "neutral",
+    "confidence": 1.0,
+    "catalyst": "none",
+    "x_calls": 4,
+    "cost": 0.0242615
+  },
+  "GRASS:2026-04-23": {
+    "direction": "long",
+    "confidence": 0.7,
+    "catalyst": "DePIN +11.51% gain, AI data stack",
+    "x_calls": 3,
+    "cost": 0.02479035
+  },
+  "STABLE:2026-04-24": {
+    "direction": "long",
+    "confidence": 0.8,
+    "catalyst": "28% pump, strong long bias",
+    "x_calls": 2,
+    "cost": 0.0165591
+  },
+  "PYTH:2026-04-23": {
+    "direction": "long",
+    "confidence": 0.8,
+    "catalyst": "Kalshi commodities partnership with Pyth",
+    "x_calls": 2,
+    "cost": 0.01440285
+  },
+  "ZEC:2026-04-24": {
+    "direction": "long",
+    "confidence": 0.85,
+    "catalyst": "Robinhood listing",
+    "x_calls": 2,
+    "cost": 0.01458785
+  },
+  "SKR:2026-04-24": {
+    "direction": "long",
+    "confidence": 0.8,
+    "catalyst": "Seeker S1 claims closed; dApp integrations growing",
+    "x_calls": 2,
+    "cost": 0.01790535
+  },
+  "TRX:2026-04-24": {
+    "direction": "neutral",
+    "confidence": 1.0,
+    "catalyst": "none",
+    "x_calls": 2,
+    "cost": 0.0131466
+  },
+  "WLFI:2026-04-24": {
+    "direction": "short",
+    "confidence": 0.85,
+    "catalyst": "Justin Sun sues WLFI over frozen tokens",
+    "x_calls": 2,
+    "cost": 0.01818535
+  },
+  "RIVER:2026-04-24": {
+    "direction": "long",
+    "confidence": 0.8,
+    "catalyst": "Season 5 staking + campaigns launch",
+    "x_calls": 2,
+    "cost": 0.01482035
+  },
+  "TRUMP:2026-04-24": {
+    "direction": "neutral",
+    "confidence": 0.6,
+    "catalyst": "none",
+    "x_calls": 3,
+    "cost": 0.0209241
+  },
+  "S:2026-04-24": {
+    "direction": "long",
+    "confidence": 0.7,
+    "catalyst": "Ongoing $S buybacks amid BTC rally",
+    "x_calls": 2,
+    "cost": 0.0170417
+  },
+  "ARC:2026-04-24": {
+    "direction": "long",
+    "confidence": 0.8,
+    "catalyst": "Bullish AI agent mentions & gains",
+    "x_calls": 2,
+    "cost": 0.01607285
+  },
+  "PIPPIN:2026-04-25": {
+    "direction": "neutral",
+    "confidence": 0.9,
+    "catalyst": "none",
+    "x_calls": 2,
+    "cost": 0.01308755
+  },
+  "AXS:2026-04-25": {
+    "direction": "neutral",
+    "confidence": 0.6,
+    "catalyst": "none",
+    "x_calls": 2,
+    "cost": 0.01735535
+  },
+  "OP:2026-04-25": {
+    "direction": "neutral",
+    "confidence": 0.8,
+    "catalyst": "none",
+    "x_calls": 3,
+    "cost": 0.02101025
+  },
+  "LINEA:2026-04-25": {
+    "direction": "neutral",
+    "confidence": 0.9,
+    "catalyst": "none",
+    "x_calls": 3,
+    "cost": 0.02057485
+  },
+  "PIPPIN:2026-04-24": {
+    "direction": "long",
+    "confidence": 0.75,
+    "catalyst": "High volume +3.91% gain Apr 23",
+    "x_calls": 2,
+    "cost": 0.0162888
+  },
+  "TRUMP:2026-04-25": {
+    "direction": "short",
+    "confidence": 0.8,
+    "catalyst": "rug pull and scam claims",
+    "x_calls": 2,
+    "cost": 0.01494535
+  },
+  "MNT:2026-04-25": {
+    "direction": "long",
+    "confidence": 0.7,
+    "catalyst": "Mantle DEX stock listings + bullish watchlist",
+    "x_calls": 3,
+    "cost": 0.02413505
+  },
+  "ASTER:2026-04-25": {
+    "direction": "long",
+    "confidence": 0.65,
+    "catalyst": "Bullish price targets & prediction market hype",
+    "x_calls": 2,
+    "cost": 0.01493035
+  },
+  "SKY:2026-04-26": {
+    "direction": "neutral",
+    "confidence": 0.9,
+    "catalyst": "none",
+    "x_calls": 3,
+    "cost": 0.0205366
+  },
+  "MYX:2026-04-25": {
+    "direction": "short",
+    "confidence": 0.7,
+    "catalyst": "pump-dump cycle likely repeats",
+    "x_calls": 2,
+    "cost": 0.0180716
+  },
+  "JTO:2026-04-26": {
+    "direction": "neutral",
+    "confidence": 0.9,
+    "catalyst": "none",
+    "x_calls": 2,
+    "cost": 0.0144866
+  },
+  "SYRUP:2026-04-26": {
+    "direction": "long",
+    "confidence": 0.75,
+    "catalyst": "Whales accumulating + DeFi rotation catalyst",
+    "x_calls": 3,
+    "cost": 0.02298785
+  },
+  "AVNT:2026-04-26": {
+    "direction": "neutral",
+    "confidence": 1.0,
+    "catalyst": "none",
+    "x_calls": 3,
+    "cost": 0.0207245
+  },
+  "XMR:2026-04-26": {
+    "direction": "neutral",
+    "confidence": 1.0,
+    "catalyst": "none",
+    "x_calls": 3,
+    "cost": 0.02074535
+  },
+  "LDO:2026-04-26": {
+    "direction": "neutral",
+    "confidence": 0.9,
+    "catalyst": "none",
+    "x_calls": 3,
+    "cost": 0.02103715
+  },
+  "AERO:2026-04-26": {
+    "direction": "long",
+    "confidence": 0.6,
+    "catalyst": "Volume reversal and fees bullish",
+    "x_calls": 3,
+    "cost": 0.0253432
+  },
+  "GMX:2026-04-26": {
+    "direction": "neutral",
+    "confidence": 0.8,
+    "catalyst": "none",
+    "x_calls": 2,
+    "cost": 0.01461535
+  },
+  "AAVE:2026-04-27": {
+    "direction": "long",
+    "confidence": 0.8,
+    "catalyst": "AAVE raises $160M post-Kelp exploit",
+    "x_calls": 2,
+    "cost": 0.01837785
+  },
+  "HYPE:2026-04-26": {
+    "direction": "long",
+    "confidence": 0.7,
+    "catalyst": "HIP3/4 adoption, ETF inflows",
+    "x_calls": 3,
+    "cost": 0.02076285
+  },
+  "POPCAT:2026-04-27": {
+    "direction": "neutral",
+    "confidence": 0.8,
+    "catalyst": "none",
+    "x_calls": 5,
+    "cost": 0.03250385
+  },
+  "1000TOSHI:2026-04-27": {
+    "direction": "neutral",
+    "confidence": 0.9,
+    "catalyst": "none",
+    "x_calls": 3,
+    "cost": 0.0233646
+  },
+  "PENGU:2026-04-27": {
+    "direction": "long",
+    "confidence": 0.85,
+    "catalyst": "Pudgy brand utility, 750k downloads, retail spots",
+    "x_calls": 2,
+    "cost": 0.0156041
+  },
+  "JUP:2026-04-27": {
+    "direction": "neutral",
+    "confidence": 1.0,
+    "catalyst": "none",
+    "x_calls": 4,
+    "cost": 0.02668675
+  },
+  "APEX:2026-04-27": {
+    "direction": "long",
+    "confidence": 0.85,
+    "catalyst": "XRPL launch + airdrop",
+    "x_calls": 2,
+    "cost": 0.0158466
+  },
+  "XRP:2026-04-27": {
+    "direction": "long",
+    "confidence": 0.7,
+    "catalyst": "XRPL adoption by institutions",
+    "x_calls": 3,
+    "cost": 0.02257065
+  },
+  "SUI:2026-04-27": {
+    "direction": "neutral",
+    "confidence": 1.0,
+    "catalyst": "none",
+    "x_calls": 2,
+    "cost": 0.01304285
+  },
+  "ARC:2026-04-27": {
+    "direction": "long",
+    "confidence": 0.75,
+    "catalyst": "$150K $ARC Mindshare rewards",
+    "x_calls": 3,
+    "cost": 0.02247535
+  },
+  "ETH:2026-04-27": {
+    "direction": "neutral",
+    "confidence": 0.8,
+    "catalyst": "none",
+    "x_calls": 2,
+    "cost": 0.0134263
+  },
+  "AVAX:2026-04-27": {
+    "direction": "neutral",
+    "confidence": 1.0,
+    "catalyst": "none",
+    "x_calls": 3,
+    "cost": 0.01830505
+  },
+  "BTC:2026-04-27": {
+    "direction": "long",
+    "confidence": 0.8,
+    "catalyst": "Bullish MACD, whale longs, weekend rally history",
+    "x_calls": 2,
+    "cost": 0.01627715
+  },
+  "ICP:2026-04-27": {
+    "direction": "long",
+    "confidence": 0.7,
+    "catalyst": "Wordpress running 100% on ICP",
+    "x_calls": 3,
+    "cost": 0.02278975
+  },
+  "ZRO:2026-04-27": {
+    "direction": "long",
+    "confidence": 0.7,
+    "catalyst": "Arbitrum DAO proposal involving LayerZero",
+    "x_calls": 2,
+    "cost": 0.01746535
+  },
+  "MYX:2026-04-28": {
+    "direction": "neutral",
+    "confidence": 0.9,
+    "catalyst": "none",
+    "x_calls": 2,
+    "cost": 0.01457535
+  },
+  "ARB:2026-04-27": {
+    "direction": "neutral",
+    "confidence": 0.6,
+    "catalyst": "none",
+    "x_calls": 2,
+    "cost": 0.0162266
+  },
+  "MON:2026-04-28": {
+    "direction": "neutral",
+    "confidence": 0.8,
+    "catalyst": "none",
+    "x_calls": 3,
+    "cost": 0.0233516
+  },
+  "BNB:2026-04-27": {
+    "direction": "neutral",
+    "confidence": 0.8,
+    "catalyst": "none",
+    "x_calls": 3,
+    "cost": 0.023284
+  },
+  "GMX:2026-04-28": {
+    "direction": "neutral",
+    "confidence": 0.8,
+    "catalyst": "none",
+    "x_calls": 3,
+    "cost": 0.02211495
+  },
+  "BTC:2026-04-28": {
+    "direction": "long",
+    "confidence": 0.8,
+    "catalyst": "Exchanges accumulating BTC, driving price higher",
+    "x_calls": 3,
+    "cost": 0.0213187
+  },
+  "TIA:2026-04-28": {
+    "direction": "long",
+    "confidence": 0.7,
+    "catalyst": "Celestia 2027 throughput upgrade & fee burn",
+    "x_calls": 3,
+    "cost": 0.02436035
+  },
+  "PUMP:2026-04-28": {
+    "direction": "long",
+    "confidence": 0.7,
+    "catalyst": "PUMP airdrop hype and bullish calls",
+    "x_calls": 2,
+    "cost": 0.01456035
+  },
+  "AERO:2026-04-29": {
+    "direction": "neutral",
+    "confidence": 0.8,
+    "catalyst": "none",
+    "x_calls": 3,
+    "cost": 0.02081785
+  },
+  "MORPHO:2026-04-29": {
+    "direction": "long",
+    "confidence": 0.7,
+    "catalyst": "bull flag formation",
+    "x_calls": 3,
+    "cost": 0.0199141
+  },
+  "NEAR:2026-04-28": {
+    "direction": "short",
+    "confidence": 0.65,
+    "catalyst": "bearish 1H technical setups",
+    "x_calls": 2,
+    "cost": 0.01625035
+  },
+  "1000TOSHI:2026-04-29": {
+    "direction": "neutral",
+    "confidence": 1.0,
+    "catalyst": "none",
+    "x_calls": 2,
+    "cost": 0.01343535
+  },
+  "LTC:2026-04-29": {
+    "direction": "neutral",
+    "confidence": 1.0,
+    "catalyst": "none",
+    "x_calls": 3,
+    "cost": 0.02047785
+  },
+  "1000SHIB:2026-04-29": {
+    "direction": "neutral",
+    "confidence": 1.0,
+    "catalyst": "none",
+    "x_calls": 1,
+    "cost": 0.0084716
+  },
+  "DOGE:2026-04-29": {
+    "direction": "neutral",
+    "confidence": 0.6,
+    "catalyst": "none",
+    "x_calls": 3,
+    "cost": 0.0222477
+  },
+  "1000PEPE:2026-04-29": {
+    "direction": "short",
+    "confidence": 0.7,
+    "catalyst": "multiple short signals",
+    "x_calls": 3,
+    "cost": 0.0211353
+  },
+  "BNB:2026-04-29": {
+    "direction": "neutral",
+    "confidence": 0.8,
+    "catalyst": "none",
+    "x_calls": 2,
+    "cost": 0.01268285
+  },
+  "SUI:2026-04-29": {
+    "direction": "neutral",
+    "confidence": 0.5,
+    "catalyst": "none",
+    "x_calls": 2,
+    "cost": 0.0129966
+  },
+  "WLFI:2026-04-29": {
+    "direction": "short",
+    "confidence": 0.65,
+    "catalyst": "investor criticism, drama, unlock pressure",
+    "x_calls": 2,
+    "cost": 0.0158666
+  },
+  "ADA:2026-04-29": {
+    "direction": "long",
+    "confidence": 0.85,
+    "catalyst": "SEC confirms $ADA not security",
+    "x_calls": 2,
+    "cost": 0.0160738
+  },
+  "LINK:2026-04-29": {
+    "direction": "long",
+    "confidence": 0.6,
+    "catalyst": "SEC lists $LINK as digital commodity",
+    "x_calls": 2,
+    "cost": 0.01454255
+  },
+  "ENA:2026-04-29": {
+    "direction": "short",
+    "confidence": 0.75,
+    "catalyst": "Buyback liquidity controversy",
+    "x_calls": 2,
+    "cost": 0.0166445
+  },
+  "ETH:2026-04-29": {
+    "direction": "long",
+    "confidence": 0.65,
+    "catalyst": "Institutional staking & ETF inflows",
+    "x_calls": 2,
+    "cost": 0.0194791
+  },
+  "MON:2026-04-29": {
+    "direction": "short",
+    "confidence": 0.8,
+    "catalyst": "X account suspension triggers selloff",
+    "x_calls": 2,
+    "cost": 0.0171016
+  },
+  "LIT:2026-04-29": {
+    "direction": "long",
+    "confidence": 0.8,
+    "catalyst": "Token buybacks & undervalued metrics",
+    "x_calls": 3,
+    "cost": 0.02747785
+  },
+  "ARB:2026-04-29": {
+    "direction": "neutral",
+    "confidence": 0.8,
+    "catalyst": "none",
+    "x_calls": 4,
+    "cost": 0.02721585
+  },
+  "APT:2026-04-30": {
+    "direction": "long",
+    "confidence": 0.75,
+    "catalyst": "Confidential APT privacy coin launch + OKX APP",
+    "x_calls": 3,
+    "cost": 0.0264666
+  },
+  "BTC:2026-04-29": {
+    "direction": "neutral",
+    "confidence": 1.0,
+    "catalyst": "none",
+    "x_calls": 2,
+    "cost": 0.0168512
+  },
+  "KAITO:2026-04-30": {
+    "direction": "neutral",
+    "confidence": 0.9,
+    "catalyst": "none",
+    "x_calls": 2,
+    "cost": 0.0135916
+  },
+  "PENDLE:2026-04-30": {
+    "direction": "long",
+    "confidence": 0.75,
+    "catalyst": "RWA yield buybacks, 10x potential",
+    "x_calls": 3,
+    "cost": 0.02231785
+  },
+  "AAVE:2026-04-30": {
+    "direction": "neutral",
+    "confidence": 0.5,
+    "catalyst": "none",
+    "x_calls": 4,
+    "cost": 0.02994595
+  },
+  "RIVER:2026-04-30": {
+    "direction": "long",
+    "confidence": 0.8,
+    "catalyst": "S5 staking & $3M Aave deposit",
+    "x_calls": 2,
+    "cost": 0.0208466
+  },
+  "PENDLE:2026-05-01": {
+    "direction": "long",
+    "confidence": 0.7,
+    "catalyst": "Price pumping + bullish TA targets",
+    "x_calls": 2,
+    "cost": 0.0191066
+  },
+  "APT:2026-05-01": {
+    "direction": "long",
+    "confidence": 0.75,
+    "catalyst": "Aptos privacy upgrade live on mainnet",
+    "x_calls": 3,
+    "cost": 0.02318285
+  },
+  "FF:2026-05-01": {
+    "direction": "neutral",
+    "confidence": 0.9,
+    "catalyst": "none",
+    "x_calls": 3,
+    "cost": 0.02112315
+  },
+  "TAO:2026-05-01": {
+    "direction": "long",
+    "confidence": 0.85,
+    "catalyst": "AI revenue, institutional buys, halving narrative",
+    "x_calls": 3,
+    "cost": 0.02342285
+  },
+  "DUSK:2026-05-01": {
+    "direction": "long",
+    "confidence": 0.75,
+    "catalyst": "Bullish bounce +4.83% smart contract gains",
+    "x_calls": 3,
+    "cost": 0.02672535
+  },
+  "ZRO:2026-05-01": {
+    "direction": "neutral",
+    "confidence": 0.7,
+    "catalyst": "none",
+    "x_calls": 2,
+    "cost": 0.0185091
+  },
+  "ZEC:2026-05-01": {
+    "direction": "long",
+    "confidence": 0.8,
+    "catalyst": "Bull flag breakout, +6.2% top gainer",
+    "x_calls": 2,
+    "cost": 0.0172216
+  },
+  "DASH:2026-05-01": {
+    "direction": "long",
+    "confidence": 0.8,
+    "catalyst": "Bullish divergence + high Binance longs",
+    "x_calls": 3,
+    "cost": 0.0232691
+  },
+  "ONDO:2026-05-02": {
+    "direction": "long",
+    "confidence": 0.7,
+    "catalyst": "RWA sector growth and adoption",
+    "x_calls": 3,
+    "cost": 0.0215738
+  },
+  "TAO:2026-05-02": {
+    "direction": "long",
+    "confidence": 0.8,
+    "catalyst": "Bullish TA, subnet hype",
+    "x_calls": 2,
+    "cost": 0.01541535
+  },
+  "ZK:2026-05-02": {
+    "direction": "neutral",
+    "confidence": 0.9,
+    "catalyst": "none",
+    "x_calls": 3,
+    "cost": 0.0224632
+  },
+  "BTC:2026-05-02": {
+    "direction": "long",
+    "confidence": 0.7,
+    "catalyst": "Relief rally and dip accumulation expected",
+    "x_calls": 2,
+    "cost": 0.0162641
+  },
+  "FOGO:2026-05-03": {
+    "direction": "long",
+    "confidence": 0.75,
+    "catalyst": "Fogo Season 2 airdrop + staking yields",
+    "x_calls": 3,
+    "cost": 0.0245691
+  },
+  "ARB:2026-05-03": {
+    "direction": "neutral",
+    "confidence": 0.8,
+    "catalyst": "none",
+    "x_calls": 3,
+    "cost": 0.02104035
+  },
+  "TRX:2026-05-03": {
+    "direction": "long",
+    "confidence": 0.65,
+    "catalyst": "Tron treasury growth & adoption",
+    "x_calls": 3,
+    "cost": 0.0210188
+  },
+  "XMR:2026-05-03": {
+    "direction": "neutral",
+    "confidence": 0.9,
+    "catalyst": "none",
+    "x_calls": 3,
+    "cost": 0.02292665
+  },
+  "ZEC:2026-05-03": {
+    "direction": "long",
+    "confidence": 0.85,
+    "catalyst": "Privacy narrative boost & bullish breakout",
+    "x_calls": 2,
+    "cost": 0.01647035
+  },
+  "VVV:2026-05-03": {
+    "direction": "long",
+    "confidence": 0.8,
+    "catalyst": "Supply cuts + AI token burns",
+    "x_calls": 3,
+    "cost": 0.02661285
+  },
+  "ONDO:2026-05-03": {
+    "direction": "long",
+    "confidence": 0.85,
+    "catalyst": "Institutional RWA growth and breakout signals",
+    "x_calls": 2,
+    "cost": 0.0184916
+  },
+  "BTC:2026-05-03": {
+    "direction": "neutral",
+    "confidence": 0.9,
+    "catalyst": "none",
+    "x_calls": 3,
+    "cost": 0.02121005
+  },
+  "AXS:2026-05-04": {
+    "direction": "neutral",
+    "confidence": 0.8,
+    "catalyst": "none",
+    "x_calls": 4,
+    "cost": 0.02644
+  },
+  "ZEC:2026-05-04": {
+    "direction": "neutral",
+    "confidence": 0.8,
+    "catalyst": "none",
+    "x_calls": 2,
+    "cost": 0.01656035
+  },
+  "DASH:2026-05-04": {
+    "direction": "long",
+    "confidence": 0.75,
+    "catalyst": "Privacy coin targets 10x MC",
+    "x_calls": 3,
+    "cost": 0.02610535
+  },
+  "BTC:2026-05-04": {
+    "direction": "neutral",
+    "confidence": 0.9,
+    "catalyst": "none",
+    "x_calls": 1,
+    "cost": 0.0088691
+  },
+  "DOGE:2026-05-04": {
+    "direction": "long",
+    "confidence": 0.7,
+    "catalyst": "Whale opens $1.7M DOGE long",
+    "x_calls": 2,
+    "cost": 0.0146291
+  },
+  "ETH:2026-05-04": {
+    "direction": "long",
+    "confidence": 0.6,
+    "catalyst": "ETH targets hit, mainnet innovations",
+    "x_calls": 3,
+    "cost": 0.0212912
+  },
+  "UNI:2026-05-04": {
+    "direction": "neutral",
+    "confidence": 0.9,
+    "catalyst": "none",
+    "x_calls": 2,
+    "cost": 0.0129666
+  },
+  "ONDO:2026-05-04": {
+    "direction": "neutral",
+    "confidence": 0.8,
+    "catalyst": "none",
+    "x_calls": 2,
+    "cost": 0.0153812
+  },
+  "BNB:2026-05-04": {
+    "direction": "long",
+    "confidence": 0.8,
+    "catalyst": "BNB Chain institutional adoptions + burns",
+    "x_calls": 3,
+    "cost": 0.0235796
+  },
+  "LINK:2026-05-04": {
+    "direction": "long",
+    "confidence": 0.7,
+    "catalyst": "NYSE tokenized securities news (powered by $LINK)",
+    "x_calls": 3,
+    "cost": 0.02101195
+  },
+  "ARB:2026-05-04": {
+    "direction": "neutral",
+    "confidence": 0.6,
+    "catalyst": "none",
+    "x_calls": 2,
+    "cost": 0.01783535
+  },
+  "ZK:2026-05-04": {
+    "direction": "long",
+    "confidence": 0.8,
+    "catalyst": "ZKsync institutional adoption & staking pilot",
+    "x_calls": 3,
+    "cost": 0.02302785
+  },
+  "PENDLE:2026-05-04": {
+    "direction": "neutral",
+    "confidence": 0.9,
+    "catalyst": "none",
+    "x_calls": 4,
+    "cost": 0.0264693
+  },
+  "CC:2026-05-04": {
+    "direction": "long",
+    "confidence": 0.75,
+    "catalyst": "Canton Network revenue & big bank adoption",
+    "x_calls": 2,
+    "cost": 0.0182166
+  },
+  "TON:2026-05-04": {
+    "direction": "neutral",
+    "confidence": 0.7,
+    "catalyst": "none",
+    "x_calls": 2,
+    "cost": 0.01698565
+  },
+  "STBL:2026-05-04": {
+    "direction": "long",
+    "confidence": 0.85,
+    "catalyst": "NYSE tokenized securities validation",
+    "x_calls": 2,
+    "cost": 0.0161641
+  },
+  "RESOLV:2026-05-04": {
+    "direction": "short",
+    "confidence": 0.7,
+    "catalyst": "none",
+    "x_calls": 3,
+    "cost": 0.0261891
+  },
+  "TON:2026-05-05": {
+    "direction": "long",
+    "confidence": 0.9,
+    "catalyst": "Telegram becomes TON's largest validator",
+    "x_calls": 3,
+    "cost": 0.02318785
+  },
+  "PENGU:2026-05-05": {
+    "direction": "long",
+    "confidence": 0.8,
+    "catalyst": "Pudgy staking + bullish charts",
+    "x_calls": 3,
+    "cost": 0.02386335
+  },
+  "TIA:2026-05-05": {
+    "direction": "neutral",
+    "confidence": 0.7,
+    "catalyst": "none",
+    "x_calls": 3,
+    "cost": 0.02341225
+  },
+  "BTC:2026-05-05": {
+    "direction": "long",
+    "confidence": 0.7,
+    "catalyst": "Bullish predictions and technical strength",
+    "x_calls": 2,
+    "cost": 0.01882035
+  },
+  "MORPHO:2026-05-05": {
+    "direction": "long",
+    "confidence": 0.85,
+    "catalyst": "Whale inflows & Base blue chip status",
+    "x_calls": 3,
+    "cost": 0.0246816
+  },
+  "HYPE:2026-05-05": {
+    "direction": "long",
+    "confidence": 0.75,
+    "catalyst": "ETF triggers and whale accumulation",
+    "x_calls": 2,
+    "cost": 0.01561785
+  },
+  "ENA:2026-05-05": {
+    "direction": "short",
+    "confidence": 0.75,
+    "catalyst": "ENA token unlock 1.96% supply",
+    "x_calls": 2,
+    "cost": 0.02148035
+  },
+  "ICP:2026-05-05": {
+    "direction": "neutral",
+    "confidence": 0.6,
+    "catalyst": "none",
+    "x_calls": 2,
+    "cost": 0.01515535
+  },
+  "BCH:2026-05-05": {
+    "direction": "neutral",
+    "confidence": 0.9,
+    "catalyst": "none",
+    "x_calls": 4,
+    "cost": 0.0282419
+  },
+  "EDGE:2026-05-05": {
+    "direction": "long",
+    "confidence": 0.8,
+    "catalyst": "Top 90-day gainer +219%, smart money buys",
+    "x_calls": 2,
+    "cost": 0.0169866
+  },
+  "JUP:2026-05-05": {
+    "direction": "long",
+    "confidence": 0.6,
+    "catalyst": "Bullish auction rotation absorption",
+    "x_calls": 3,
+    "cost": 0.01968535
+  },
+  "PENDLE:2026-05-05": {
+    "direction": "long",
+    "confidence": 0.8,
+    "catalyst": "Pendle tokenomics fix & buybacks",
+    "x_calls": 3,
+    "cost": 0.02408535
+  },
+  "ZORA:2026-05-05": {
+    "direction": "long",
+    "confidence": 0.6,
+    "catalyst": "dev updates + potential creator coin pumps",
+    "x_calls": 3,
+    "cost": 0.0223466
+  },
+  "VVV:2026-05-05": {
+    "direction": "long",
+    "confidence": 0.8,
+    "catalyst": "upcoming token burns May 8-9",
+    "x_calls": 3,
+    "cost": 0.0232992
+  },
+  "PENDLE:2026-05-06": {
+    "direction": "long",
+    "confidence": 0.85,
+    "catalyst": "STRC proxy + Clarity bill beneficiary",
+    "x_calls": 3,
+    "cost": 0.0209816
+  },
+  "ZEC:2026-05-05": {
+    "direction": "long",
+    "confidence": 0.75,
+    "catalyst": "FCMP++ testnet May 6, high volume",
+    "x_calls": 4,
+    "cost": 0.0296627
+  },
+  "EIGEN:2026-05-05": {
+    "direction": "neutral",
+    "confidence": 0.8,
+    "catalyst": "none",
+    "x_calls": 4,
+    "cost": 0.03091745
+  },
+  "BTC:2026-05-06": {
+    "direction": "neutral",
+    "confidence": 0.5,
+    "catalyst": "none",
+    "x_calls": 2,
+    "cost": 0.01327035
+  },
+  "BNB:2026-05-06": {
+    "direction": "neutral",
+    "confidence": 0.8,
+    "catalyst": "none",
+    "x_calls": 4,
+    "cost": 0.0274339
+  },
+  "AAVE:2026-05-06": {
+    "direction": "neutral",
+    "confidence": 0.8,
+    "catalyst": "none",
+    "x_calls": 3,
+    "cost": 0.02006275
+  },
+  "ARB:2026-05-06": {
+    "direction": "long",
+    "confidence": 0.65,
+    "catalyst": "altseason bull run hype",
+    "x_calls": 3,
+    "cost": 0.02276785
+  },
+  "APT:2026-05-06": {
+    "direction": "neutral",
+    "confidence": 0.7,
+    "catalyst": "none",
+    "x_calls": 2,
+    "cost": 0.0166241
+  },
+  "ARB:2026-05-07": {
+    "direction": "neutral",
+    "confidence": 0.8,
+    "catalyst": "none",
+    "x_calls": 3,
+    "cost": 0.0242891
+  },
+  "AAVE:2026-05-08": {
+    "direction": "neutral",
+    "confidence": 0.9,
+    "catalyst": "none",
+    "x_calls": 3,
+    "cost": 0.01997285
+  },
+  "ARB:2026-05-08": {
+    "direction": "neutral",
+    "confidence": 0.7,
+    "catalyst": "Arbitrum hack recovery proposal",
+    "x_calls": 2,
+    "cost": 0.01644035
+  },
+  "APT:2026-05-08": {
+    "direction": "neutral",
+    "confidence": 0.9,
+    "catalyst": "none",
+    "x_calls": 3,
+    "cost": 0.02266275
+  },
+  "AAVE:2026-05-09": {
+    "direction": "neutral",
+    "confidence": 0.8,
+    "catalyst": "none",
+    "x_calls": 3,
+    "cost": 0.02041285
+  },
+  "RESOLV:2026-05-09": {
+    "direction": "long",
+    "confidence": 0.7,
+    "catalyst": "none",
+    "x_calls": 3,
+    "cost": 0.02061755
+  },
+  "CC:2026-05-09": {
+    "direction": "long",
+    "confidence": 0.8,
+    "catalyst": "Canton ETF launch and revenue growth",
+    "x_calls": 2,
+    "cost": 0.0171591
+  },
+  "UNI:2026-05-10": {
+    "direction": "long",
+    "confidence": 0.6,
+    "catalyst": "Uniswap V4 Hooks dev innovation",
+    "x_calls": 2,
+    "cost": 0.01636035
+  },
+  "1000TOSHI:2026-05-10": {
+    "direction": "neutral",
+    "confidence": 1.0,
+    "catalyst": "none",
+    "x_calls": 3,
+    "cost": 0.0196068
+  },
+  "ZORA:2026-05-10": {
+    "direction": "short",
+    "confidence": 0.7,
+    "catalyst": "Delisting from ITLX wallet",
+    "x_calls": 2,
+    "cost": 0.0184191
+  },
+  "GMX:2026-05-10": {
+    "direction": "long",
+    "confidence": 0.8,
+    "catalyst": "Perp DEX volume to dwarf spot",
+    "x_calls": 3,
+    "cost": 0.0233566
+  },
+  "1000SHIB:2026-05-10": {
+    "direction": "long",
+    "confidence": 0.4,
+    "catalyst": "Binance futures TP hit 152%",
+    "x_calls": 3,
+    "cost": 0.02111035
+  },
+  "ADA:2026-05-10": {
+    "direction": "neutral",
+    "confidence": 0.8,
+    "catalyst": "none",
+    "x_calls": 2,
+    "cost": 0.0136166
+  },
+  "SUI:2026-05-10": {
+    "direction": "long",
+    "confidence": 0.8,
+    "catalyst": "CME futures launch & Sui Live positives",
+    "x_calls": 3,
+    "cost": 0.0235154
+  },
+  "HBAR:2026-05-10": {
+    "direction": "long",
+    "confidence": 0.8,
+    "catalyst": "Community gains network control, AI utility",
+    "x_calls": 2,
+    "cost": 0.01780785
+  },
+  "WLD:2026-05-10": {
+    "direction": "neutral",
+    "confidence": 0.8,
+    "catalyst": "none",
+    "x_calls": 3,
+    "cost": 0.0252398
+  },
+  "S:2026-05-10": {
+    "direction": "long",
+    "confidence": 0.75,
+    "catalyst": "bullish $S/USDT triangle breakout pump",
+    "x_calls": 2,
+    "cost": 0.0176941
+  },
+  "XRP:2026-05-10": {
+    "direction": "neutral",
+    "confidence": 0.9,
+    "catalyst": "none",
+    "x_calls": 3,
+    "cost": 0.0225345
+  },
+  "XLM:2026-05-10": {
+    "direction": "long",
+    "confidence": 0.6,
+    "catalyst": "Yield opportunity and euphoria",
+    "x_calls": 2,
+    "cost": 0.0185998
+  },
+  "1000PEPE:2026-05-10": {
+    "direction": "short",
+    "confidence": 0.7,
+    "catalyst": "short signals at resistance exhaustion",
+    "x_calls": 3,
+    "cost": 0.0216766
+  },
+  "SEI:2026-05-10": {
+    "direction": "long",
+    "confidence": 0.8,
+    "catalyst": "Bullish breakout + top gainer",
+    "x_calls": 4,
+    "cost": 0.02727275
+  },
+  "1000BONK:2026-05-10": {
+    "direction": "long",
+    "confidence": 0.9,
+    "catalyst": "532% profit on Binance futures long",
+    "x_calls": 2,
+    "cost": 0.0145441
+  },
+  "DOT:2026-05-10": {
+    "direction": "neutral",
+    "confidence": 0.7,
+    "catalyst": "none",
+    "x_calls": 3,
+    "cost": 0.02548665
+  },
+  "USELESS:2026-05-10": {
+    "direction": "short",
+    "confidence": 0.7,
+    "catalyst": "Heavy short calls on weak performance",
+    "x_calls": 2,
+    "cost": 0.0172091
+  },
+  "AAVE:2026-05-10": {
+    "direction": "long",
+    "confidence": 0.8,
+    "catalyst": "Judge clears $71M ETH recovery",
+    "x_calls": 2,
+    "cost": 0.0152688
+  },
+  "DUSK:2026-05-10": {
+    "direction": "long",
+    "confidence": 0.75,
+    "catalyst": "Bullish sentiment on privacy gem",
+    "x_calls": 3,
+    "cost": 0.0272788
+  },
+  "ARC:2026-05-10": {
+    "direction": "long",
+    "confidence": 0.8,
+    "catalyst": "ARC Terminal AI progress and pumps",
+    "x_calls": 2,
+    "cost": 0.0183266
+  },
+  "LTC:2026-05-10": {
+    "direction": "neutral",
+    "confidence": 0.6,
+    "catalyst": "none",
+    "x_calls": 2,
+    "cost": 0.0152713
+  },
+  "BNB:2026-05-10": {
+    "direction": "long",
+    "confidence": 0.7,
+    "catalyst": "BNB Chain ecosystem growth & TVL momentum",
+    "x_calls": 2,
+    "cost": 0.01850555
+  },
+  "LDO:2026-05-11": {
+    "direction": "neutral",
+    "confidence": 0.9,
+    "catalyst": "none",
+    "x_calls": 3,
+    "cost": 0.02306225
+  },
+  "VVV:2026-05-11": {
+    "direction": "long",
+    "confidence": 0.85,
+    "catalyst": "AI inference demand and Venice growth",
+    "x_calls": 3,
+    "cost": 0.02776535
+  },
+  "FF:2026-05-11": {
+    "direction": "neutral",
+    "confidence": 0.6,
+    "catalyst": "none",
+    "x_calls": 2,
+    "cost": 0.0150191
+  },
+  "CRV:2026-05-11": {
+    "direction": "neutral",
+    "confidence": 0.9,
+    "catalyst": "none",
+    "x_calls": 3,
+    "cost": 0.0214156
+  },
+  "NMR:2026-05-11": {
+    "direction": "long",
+    "confidence": 0.7,
+    "catalyst": "bullish TA and staking growth",
+    "x_calls": 3,
+    "cost": 0.02448285
+  },
+  "STBL:2026-05-11": {
+    "direction": "neutral",
+    "confidence": 0.9,
+    "catalyst": "none",
+    "x_calls": 3,
+    "cost": 0.02423055
+  },
+  "CRO:2026-05-11": {
+    "direction": "neutral",
+    "confidence": 0.8,
+    "catalyst": "none",
+    "x_calls": 2,
+    "cost": 0.0158516
+  },
+  "XAG:2026-05-11": {
+    "direction": "short",
+    "confidence": 0.8,
+    "catalyst": "Bearish short buildup with volume",
+    "x_calls": 3,
+    "cost": 0.02560535
+  },
+  "XCU:2026-05-11": {
+    "direction": "long",
+    "confidence": 0.7,
+    "catalyst": "energy infra beneficiary",
+    "x_calls": 3,
+    "cost": 0.0243837
+  },
+  "XPT:2026-05-11": {
+    "direction": "long",
+    "confidence": 0.8,
+    "catalyst": "bullish channel up, next leg soon",
+    "x_calls": 2,
+    "cost": 0.01417285
+  },
+  "SKY:2026-05-11": {
+    "direction": "long",
+    "confidence": 0.75,
+    "catalyst": "Debt and collateral at ATH",
+    "x_calls": 2,
+    "cost": 0.01781535
+  },
+  "USELESS:2026-05-11": {
+    "direction": "long",
+    "confidence": 0.7,
+    "catalyst": "Price running, community shilling",
+    "x_calls": 2,
+    "cost": 0.01478535
+  }
+}
