@@ -164,6 +164,208 @@ CREATE TABLE IF NOT EXISTS watchlist (
 
 CREATE INDEX IF NOT EXISTS idx_watchlist_expires ON watchlist(expires_at);
 CREATE INDEX IF NOT EXISTS idx_watchlist_active ON watchlist(expires_at, ticker);
+
+-- ============ EXECUTOR (EXECUTOR_SPEC.md §10 — capture raw, derive later) ============
+-- Every trade-linked row carries config_version_id so a threshold change never
+-- contaminates the dataset. Every table keeps raw_json for fields we didn't
+-- think to parse today.
+
+CREATE TABLE IF NOT EXISTS config_versions (
+    id                   INTEGER PRIMARY KEY AUTOINCREMENT,
+    config_hash          TEXT NOT NULL UNIQUE,
+    git_sha              TEXT,
+    created_at           TEXT NOT NULL,
+    enabled_tiers        TEXT,
+    max_loss_per_trade   REAL,
+    leverage_cap         REAL,
+    time_exit_hours      REAL,
+    extension_threshold_r REAL,
+    max_concurrent       INTEGER,
+    daily_max_loss       REAL,
+    full_config_json     TEXT
+);
+
+CREATE TABLE IF NOT EXISTS signal_snapshots (
+    id                      INTEGER PRIMARY KEY AUTOINCREMENT,
+    alert_ts                INTEGER NOT NULL,
+    ticker                  TEXT NOT NULL,
+    asset_class             TEXT,
+    tier_decision           TEXT,
+    structure_type          TEXT,
+    breakout_level          REAL,
+    swing_high_4h           REAL,
+    swing_low_4h            REAL,
+    swing_ref_ts            TEXT,
+    median_bar_range_1h     REAL,
+    distance_past_pivot_pct REAL,
+    range_ratio_1h          REAL,
+    range_ratio_15m         REAL,
+    score                   REAL,
+    score_pctile            REAL,
+    alpha_z                 REAL,
+    r_alpha_pct             REAL,
+    vol_ratio               REAL,
+    volume_z                REAL,
+    cluster_size            INTEGER,
+    pop_score               REAL,
+    oi_velocity_z           REAL,
+    funding_z               REAL,
+    wash_penalty            REAL,
+    oi_usd                  REAL,
+    funding_1h              REAL,
+    book_bid_usd            REAL,
+    book_ask_usd            REAL,
+    book_ratio              REAL,
+    book_sentiment          TEXT,
+    vpoc_price              REAL,
+    vpoc_near_breakout      INTEGER,
+    btc_ret_4h              REAL,
+    btc_range_expansion     REAL,
+    htf_trend_align_7d      INTEGER,
+    adj_direction           TEXT,
+    adj_confidence          REAL,
+    adj_setup_quality       REAL,
+    adj_conviction_tier     TEXT,
+    adj_flipped             INTEGER,
+    adj_thesis              TEXT,
+    clf_catalyst_type       TEXT,
+    clf_direction           TEXT,
+    clf_confidence          REAL,
+    clf_summary             TEXT,
+    clf_evidence_quotes     TEXT,
+    news_items_json         TEXT,
+    utc_hour                INTEGER,
+    day_of_week             INTEGER,
+    tier_source             INTEGER,
+    watchlist_age_hours     REAL,
+    config_version_id       INTEGER,
+    raw_json                TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_snapshots_ticker_ts ON signal_snapshots(ticker, alert_ts DESC);
+
+CREATE TABLE IF NOT EXISTS executions (
+    id                    INTEGER PRIMARY KEY AUTOINCREMENT,
+    signal_snapshot_id    INTEGER,
+    acted                 INTEGER NOT NULL,
+    skip_reason           TEXT,
+    conviction_tier       TEXT,
+    risk_per_unit         REAL,
+    intended_entry        REAL,
+    intended_stop         REAL,
+    intended_tp1          REAL,
+    intended_tp2          REAL,
+    computed_size_usd     REAL,
+    computed_contracts    REAL,
+    size_mult_score       REAL,
+    leverage_used         REAL,
+    free_margin_at_decision REAL,
+    config_version_id     INTEGER,
+    created_at            TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_executions_created ON executions(created_at DESC);
+
+CREATE TABLE IF NOT EXISTS orders (
+    id                INTEGER PRIMARY KEY AUTOINCREMENT,
+    execution_id      INTEGER,
+    ticker            TEXT,
+    market_index      INTEGER,
+    leg               TEXT,
+    client_order_index INTEGER,
+    order_type        TEXT,
+    is_ask            INTEGER,
+    reduce_only       INTEGER,
+    trigger_price     REAL,
+    limit_price       REAL,
+    base_amount_int   INTEGER,
+    tx_hash           TEXT,
+    submit_ts         TEXT,
+    ack_status        TEXT,
+    terminal_status   TEXT,
+    reject_reason     TEXT,
+    raw_request_json  TEXT,
+    raw_response_json TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_orders_execution ON orders(execution_id);
+CREATE INDEX IF NOT EXISTS idx_orders_coi ON orders(client_order_index);
+
+CREATE TABLE IF NOT EXISTS fills (
+    id                INTEGER PRIMARY KEY AUTOINCREMENT,
+    order_id          INTEGER,
+    ticker            TEXT,
+    fill_ts           TEXT,
+    fill_price        REAL,
+    fill_base_amount  REAL,
+    fee_usd           REAL,
+    is_partial        INTEGER,
+    cumulative_filled REAL,
+    raw_json          TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_fills_order ON fills(order_id);
+
+CREATE TABLE IF NOT EXISTS positions (
+    id                   INTEGER PRIMARY KEY AUTOINCREMENT,
+    execution_id         INTEGER,
+    ticker               TEXT NOT NULL,
+    direction            TEXT,
+    open_ts              INTEGER,
+    entry_avg_price      REAL,
+    size_contracts       REAL,
+    conviction_tier      TEXT,
+    stop_order_id        INTEGER,
+    tp_order_id          INTEGER,
+    stop_price_current   REAL,
+    breakeven_moved      INTEGER DEFAULT 0,
+    trailing_active      INTEGER DEFAULT 0,
+    exit_ts              INTEGER,
+    exit_reason          TEXT,
+    realized_pnl_usd     REAL,
+    fees_total_usd       REAL,
+    slippage_vs_alert_px_bps REAL,
+    slippage_vs_bar_close_bps REAL,
+    mfe_pct              REAL,
+    mae_pct              REAL,
+    pnl_at_1h_pct        REAL,
+    pnl_at_4h_pct        REAL,
+    stop_hit_before_1h   INTEGER,
+    time_to_mfe_min      REAL,
+    time_to_mae_min      REAL,
+    plan_stop            REAL,
+    plan_tp1             REAL,
+    blowoff_flag         INTEGER DEFAULT 0,
+    config_version_id    INTEGER,
+    raw_json             TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_positions_open ON positions(exit_ts, ticker);
+
+CREATE TABLE IF NOT EXISTS position_marks (
+    id                   INTEGER PRIMARY KEY AUTOINCREMENT,
+    position_id          INTEGER NOT NULL,
+    ts                   INTEGER NOT NULL,
+    mark_price           REAL,
+    unrealized_pnl_pct   REAL,
+    minutes_since_entry  REAL
+);
+
+CREATE INDEX IF NOT EXISTS idx_marks_position_ts ON position_marks(position_id, ts);
+
+CREATE TABLE IF NOT EXISTS equity_snapshots (
+    id                   INTEGER PRIMARY KEY AUTOINCREMENT,
+    ts                   INTEGER NOT NULL,
+    balance_usd          REAL,
+    free_margin_usd      REAL,
+    total_exposure_usd   REAL,
+    open_position_count  INTEGER,
+    daily_realized_pnl_usd REAL,
+    consecutive_losses   INTEGER,
+    raw_json             TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_equity_ts ON equity_snapshots(ts DESC);
 """
 
 
@@ -850,3 +1052,150 @@ def _hours(n: int):
     """Tiny helper so add_to_watchlist doesn't need to import timedelta."""
     from datetime import timedelta
     return timedelta(hours=int(n))
+
+
+# ============ executor tables (EXECUTOR_SPEC.md §10) ============
+#
+# Generic insert/update used by the executor + exit engine. Column names are
+# code-controlled (never user-supplied) so the f-string identifier interpolation
+# is safe; all *values* are parametrized.
+
+def insert_row(table: str, row: dict[str, Any], db_path: str | None = None) -> int:
+    """Insert a dict as a row into ``table``; return the new rowid."""
+    cols = list(row.keys())
+    collist = ", ".join(cols)
+    placeholders = ", ".join("?" for _ in cols)
+    with _conn(db_path) as cx:
+        cur = cx.execute(
+            f"INSERT INTO {table} ({collist}) VALUES ({placeholders})",
+            tuple(row[c] for c in cols),
+        )
+        return int(cur.lastrowid or 0)
+
+
+def update_row(table: str, row_id: int, fields: dict[str, Any], db_path: str | None = None) -> None:
+    """Patch the named columns of one row by id. No-op for an empty patch."""
+    if not fields:
+        return
+    sets = ", ".join(f"{k} = ?" for k in fields)
+    with _conn(db_path) as cx:
+        cx.execute(
+            f"UPDATE {table} SET {sets} WHERE id = ?",
+            (*fields.values(), row_id),
+        )
+
+
+def get_row(table: str, row_id: int, db_path: str | None = None) -> dict | None:
+    with _conn(db_path) as cx:
+        row = cx.execute(f"SELECT * FROM {table} WHERE id = ?", (row_id,)).fetchone()
+        return dict(row) if row else None
+
+
+# ---- config_versions: get-or-create by config hash ----
+
+def get_or_create_config_version(
+    config_hash: str,
+    fields: dict[str, Any],
+    db_path: str | None = None,
+) -> int:
+    """Return the id of the config_versions row for ``config_hash``, inserting
+    it (with ``fields``) the first time a given hash is seen. Idempotent — a
+    threshold change yields a new hash and a new row; unchanged config reuses."""
+    with _conn(db_path) as cx:
+        row = cx.execute(
+            "SELECT id FROM config_versions WHERE config_hash = ?", (config_hash,)
+        ).fetchone()
+        if row is not None:
+            return int(row["id"])
+        payload = {"config_hash": config_hash, **fields}
+        cols = ", ".join(payload.keys())
+        ph = ", ".join("?" for _ in payload)
+        cur = cx.execute(
+            f"INSERT INTO config_versions ({cols}) VALUES ({ph})",
+            tuple(payload.values()),
+        )
+        return int(cur.lastrowid or 0)
+
+
+# ---- positions lifecycle queries (exit engine + circuit breaker) ----
+
+def open_positions(db_path: str | None = None) -> list[dict]:
+    """Positions that have not yet exited (exit_ts IS NULL)."""
+    with _conn(db_path) as cx:
+        cur = cx.execute(
+            "SELECT * FROM positions WHERE exit_ts IS NULL ORDER BY open_ts ASC"
+        )
+        return [dict(r) for r in cur.fetchall()]
+
+
+def open_position_count(db_path: str | None = None) -> int:
+    with _conn(db_path) as cx:
+        row = cx.execute(
+            "SELECT COUNT(*) AS c FROM positions WHERE exit_ts IS NULL"
+        ).fetchone()
+    return int(row["c"]) if row else 0
+
+
+def total_open_exposure_usd(db_path: str | None = None) -> float:
+    """Sum of size_contracts × entry_avg_price across open positions."""
+    with _conn(db_path) as cx:
+        row = cx.execute(
+            "SELECT COALESCE(SUM(size_contracts * entry_avg_price), 0.0) AS e "
+            "FROM positions WHERE exit_ts IS NULL"
+        ).fetchone()
+    return float(row["e"]) if row and row["e"] is not None else 0.0
+
+
+def daily_realized_pnl_usd(db_path: str | None = None) -> float:
+    """Realized PnL summed over positions that exited since UTC midnight."""
+    now = _now()
+    today_start = now - (now % 86400)
+    with _conn(db_path) as cx:
+        row = cx.execute(
+            "SELECT COALESCE(SUM(realized_pnl_usd), 0.0) AS p FROM positions "
+            "WHERE exit_ts IS NOT NULL AND exit_ts >= ?",
+            (today_start,),
+        ).fetchone()
+    return float(row["p"]) if row and row["p"] is not None else 0.0
+
+
+def trades_opened_today(db_path: str | None = None) -> int:
+    now = _now()
+    today_start = now - (now % 86400)
+    with _conn(db_path) as cx:
+        row = cx.execute(
+            "SELECT COUNT(*) AS c FROM positions WHERE open_ts >= ?",
+            (today_start,),
+        ).fetchone()
+    return int(row["c"]) if row else 0
+
+
+def consecutive_losses(db_path: str | None = None) -> int:
+    """Count of consecutive losing closes at the tail of the exit history.
+    Resets to 0 the moment a non-loss (>=0 PnL) close is encountered."""
+    with _conn(db_path) as cx:
+        cur = cx.execute(
+            "SELECT realized_pnl_usd FROM positions "
+            "WHERE exit_ts IS NOT NULL ORDER BY exit_ts DESC LIMIT 100"
+        )
+        rows = cur.fetchall()
+    streak = 0
+    for r in rows:
+        pnl = r["realized_pnl_usd"]
+        if pnl is not None and float(pnl) < 0:
+            streak += 1
+        else:
+            break
+    return streak
+
+
+def position_by_coi(client_order_index: int, db_path: str | None = None) -> dict | None:
+    """Look up a position via the entry order's client_order_index — used by
+    boot reconciliation to dedupe against re-derived COIs."""
+    with _conn(db_path) as cx:
+        row = cx.execute(
+            "SELECT p.* FROM positions p JOIN orders o ON o.execution_id = p.execution_id "
+            "WHERE o.client_order_index = ? AND o.leg = 'entry' LIMIT 1",
+            (client_order_index,),
+        ).fetchone()
+        return dict(row) if row else None

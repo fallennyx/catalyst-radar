@@ -260,3 +260,62 @@ TP2_FRACTION = 0.33                 # close this much at TP2
 BREAKEVEN_TRIGGER_R = 1.0           # move stop to entry once price reaches this many R
 ATR_PERIOD_HOURS = 14               # 14h ATR drives the trailing stop
 TRAIL_ATR_MULT = 1.5                # trail final tranche by 1.5 x ATR(14h)
+
+# ============ EXECUTOR (live execution layer — see EXECUTOR_SPEC.md) ============
+# Two-stage master switch:
+#   EXECUTOR_ENABLED — run the decision / sizing / data-capture pipeline on every
+#     EMIT (writes signal_snapshots, executions, position-intent rows; logs the
+#     orders it WOULD send). Safe; never touches the exchange.
+#   EXECUTOR_LIVE    — actually place real-money orders on Lighter. Requires the
+#     SDK importable + LIGHTER_* env keys set. Per §9 G0, keep this OFF until a
+#     1-contract manual place→stop→cancel→flatten verification passes.
+# When ENABLED but not LIVE, the engine runs in "shadow" mode: full capture +
+# counterfactual exit simulation in the exit engine, zero exchange interaction.
+EXECUTOR_ENABLED = True
+EXECUTOR_LIVE = False
+
+# ---- §2 tiered entry. v1 ships Tier A ONLY. Widen by data, not feeling. ----
+EXECUTOR_ENABLED_TIERS = {"A"}             # later: {"A", "B", "C_pop"}
+TIER_SIZE_MULT = {"A": 1.0, "B": 0.66, "C_pop": 0.5}
+
+TIER_A_ALPHA_Z_MIN = 3.0
+TIER_A_SCORE_PCTILE_MIN = 75.0
+TIER_B_SCORE_PCTILE_MIN = 75.0
+TIER_CPOP_CLUSTER_MIN = 5
+TIER_CPOP_BTC_RET_4H_MIN = 2.0             # percent
+
+# SKIP traps (checked BEFORE tier assignment — they override). [VALIDATED]
+SKIP_TRAP_ALPHA_Z_LO = 2.0                 # |alpha_z| ∈ [2,3) AND pctile≥50 → the 16.7% trap
+SKIP_TRAP_ALPHA_Z_HI = 3.0
+SKIP_TRAP_SCORE_PCTILE = 50.0
+SKIP_BLOWOFF_VOL_RATIO = 15.0              # vol_ratio>15× AND |alpha_z|<3 → blowoff, 15.4% WR
+SKIP_INERT_CLASSES = {"crypto_t1"}         # structurally inert, no tails, 32% WR
+
+# ---- §3 position sizing. Dollar loss at stop is fixed regardless of stop width. ----
+MAX_LOSS_PER_TRADE_USD = 5.0               # de minimis on purpose
+MAX_CONCURRENT_POSITIONS = 3
+MAX_TOTAL_EXPOSURE_USD = 200.0
+LEVERAGE_CAP = 10                          # margin efficiency only; size is risk-defined
+SCORE_SIZE_PCTILE_DIVISOR = 75.0           # score_mult = clamp(pctile/75, 1.0, 1.5); Tier A only
+SCORE_SIZE_MULT_MAX = 1.5
+
+# ---- §4 Lighter order client ----
+LIGHTER_MAINNET_URL = "https://mainnet.zklighter.elliot.ai"
+LIGHTER_API_KEY_INDEX = 0                  # which API key slot the SDK signs with
+FATFINGER_PCT = 0.05                       # reject any order whose price deviates >5% from live mark
+STOP_SLIPPAGE_PCT = 0.005                  # set stop/TP limit price this far past the trigger so it fills
+
+# ---- §5 exit engine ----
+TIME_EXIT_HOURS = 1.0
+EXTENSION_THRESHOLD_R = 0.5                # +1h PnL must clear +0.5R to hold a Tier-A runner; else cut
+MAX_HOLD_HOURS = 4.0
+EXIT_POLL_INTERVAL_SEC = 60                # exit-loop cadence (reuses the Tier-2 60s rhythm)
+POSITION_MARK_INTERVAL_SEC = 60           # per-minute mark sampling while any position is open
+BLOWOFF_VOL_RATIO = 15.0                   # force +1h close (override extension) above this
+BLOWOFF_CLUSTER_MIN = 5                    # force +1h close when cluster_size ≥ this
+
+# ---- §6 circuit breaker (anti-blowup, independent of edge) ----
+DAILY_MAX_LOSS_USD = 50.0                  # hit → halt new entries until 00:00 UTC
+DAILY_MAX_TRADES = 30                      # matches DAILY_ALERT_BUDGET
+CONSECUTIVE_LOSS_HALT = 5                  # 5 losses in a row → halt + Telegram ping
+KILL_SWITCH_FILE = "/tmp/radar_halt"       # touch this file = immediate flat + stop opening

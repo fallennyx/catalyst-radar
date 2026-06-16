@@ -155,13 +155,16 @@ def _is_cold_start(history: History) -> bool:
 def top_n_movers(
     markets: Iterable[Market],
     histories: Mapping[str, History] | None = None,
-    n: int = config.TOP_N_CANDIDATES,
+    n: int | None = config.TOP_N_CANDIDATES,
 ) -> list[tuple[Market, float]]:
     """Filter by min-volume, score, and return the top N as (market, score).
 
     Cold-start markets (no rolling 1h history yet) must additionally clear the
     asset-class |pct_1h| threshold or they're dropped — score alone isn't
     trustworthy without history.
+
+    ``n=None`` returns the full sorted distribution (used by the executor to
+    compute score_pctile across the whole filtered universe).
     """
     histories = histories or {}
     scored: list[tuple[Market, float]] = []
@@ -176,7 +179,20 @@ def top_n_movers(
         scored.append((m, score))
 
     scored.sort(key=lambda x: x[1], reverse=True)
-    return scored[:n]
+    return scored if n is None else scored[:n]
+
+
+def percentile_rank(value: float, sorted_scores: Sequence[float]) -> float:
+    """Percent of ``sorted_scores`` ≤ ``value`` (0–100). Empty → 100.0.
+
+    Used to turn a raw composite score into the backtest-validated
+    ``score_pctile`` feature the executor tiers on (§2)."""
+    import bisect
+    n = len(sorted_scores)
+    if n == 0:
+        return 100.0
+    idx = bisect.bisect_right(sorted_scores, value)
+    return float(idx) / float(n) * 100.0
 
 
 # ============================================================================

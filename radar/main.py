@@ -26,9 +26,9 @@ from typing import Any
 from dotenv import load_dotenv
 
 from . import (
-    beta, catalysts, classifier, config, direction_adjudicator, fetch_bars,
-    lighter, predictor, ranker, storage, suppression, telegram, trade_plan,
-    universe,
+    beta, catalysts, classifier, config, direction_adjudicator, executor,
+    exit_engine, fetch_bars, lighter, predictor, ranker, storage, suppression,
+    telegram, trade_plan, universe,
 )
 from .suppression import Alert
 
@@ -88,6 +88,52 @@ def btc_history() -> list[float]:
         if prev:
             rets.append((closes[i] - prev) / prev)
     return rets
+
+
+def btc_ret_4h() -> float | None:
+    """BTC 4h return in percent — a Tier C-pop / blowoff feature for the executor."""
+    rows = storage.recent_bars("BTC", hours=12)
+    closes = [r.close for r in rows if r.close is not None]
+    if len(closes) < 5:
+        return None
+    prior = closes[-5]
+    if not prior:
+        return None
+    return (closes[-1] - prior) / prior * 100.0
+
+
+def _enrich_exec_metadata(
+    metadata: dict,
+    *,
+    market: Any,
+    alert: Any,
+    score: float,
+    score_pctile: float | None,
+    btc_ret_4h_pct: float | None,
+    classifier_result: Any,
+    adjudicated: Any,
+) -> None:
+    """Stuff the backtest-validated features the executor tiers + captures on
+    into ``metadata`` (mutated in place). Kept beside the EMIT branches so the
+    executor stays a pure consumer of metadata."""
+    bundle = getattr(adjudicated, "signal_bundle", None) or {}
+    vol_ratio = None
+    try:
+        vr = bundle.get("volume_ratio")
+        vol_ratio = float(vr) if vr is not None else None
+    except (TypeError, ValueError):
+        vol_ratio = None
+    metadata.update({
+        "asset_class": market.asset_class,
+        "score": float(score),
+        "score_pctile": score_pctile,
+        "alpha_z": getattr(alert, "alpha_z", None),
+        "r_alpha_pct": getattr(alert, "r_alpha_pct", None),
+        "cluster_size": storage.count_same_sector_alerts(market.asset_class, hours=4),
+        "btc_ret_4h": btc_ret_4h_pct,
+        "vol_ratio": vol_ratio,
+        "classifier_result": classifier_result,
+    })
 
 
 def _record_market_bar(market: Any) -> None:
@@ -547,7 +593,10 @@ async def run_discovery_cycle() -> None:
             log.warning("Tier 1 snapshot failed for %s: %s", m.ticker, e)
 
     btc_rets = btc_history()
-    candidates = ranker.top_n_movers(markets, histories=histories)
+    btc_ret_4h_pct = btc_ret_4h()
+    scored_all = ranker.top_n_movers(markets, histories=histories, n=None)
+    candidates = scored_all[:config.TOP_N_CANDIDATES]
+    all_scores = sorted(s for _, s in scored_all)
     log.info("Tier 1: %d candidates: %s",
              len(candidates), [m.ticker for m, _ in candidates])
 
@@ -689,6 +738,20 @@ async def run_discovery_cycle() -> None:
                     market, result, metadata,
                     source="tier1_immediate", plan=plan,
                 )
+                # ---- Execution layer (§1 hook) — parallel to the alert, fail-open ----
+                try:
+                    _enrich_exec_metadata(
+                        metadata, market=market, alert=alert, score=score,
+                        score_pctile=ranker.percentile_rank(score, all_scores),
+                        btc_ret_4h_pct=btc_ret_4h_pct, classifier_result=result,
+                        adjudicated=adjudicated,
+                    )
+                    executor.maybe_execute(
+                        market=market, plan=plan, metadata=metadata,
+                        adjudicated=adjudicated, tier=1, news_items=news,
+                    )
+                except Exception as e:
+                    log.exception("Tier 1 executor hook failed for %s: %s", market.ticker, e)
                 log.info(
                     "Tier 1 → EMIT %s %s at break of %s [%s %s%s]%s",
                     market.ticker,
@@ -838,6 +901,35 @@ async def run_trigger_poll() -> None:
                 source="tier2_promoted", plan=plan,
             )
 
+            # ---- Execution layer (§1 hook, tier=2) — parallel to the alert ----
+            try:
+                # When the Tier-2 adjudicator is disabled there's no Adjudicated
+                # object; synthesize a minimal stand-in carrying the resolved
+                # direction so the executor can tier on it.
+                exec_adj = adjudicated
+                if exec_adj is None:
+                    from types import SimpleNamespace
+                    exec_adj = SimpleNamespace(
+                        direction=final_dir, conviction_tier="OK", flipped=False,
+                        predictor_result=None, signal_bundle={},
+                    )
+                exec_alert = build_alert(
+                    live_market, result, build_history(ticker),
+                    btc_rets=btc_history(), score=float(entry.get("score") or 0.0),
+                )
+                _enrich_exec_metadata(
+                    metadata, market=live_market, alert=exec_alert,
+                    score=float(entry.get("score") or 0.0), score_pctile=None,
+                    btc_ret_4h_pct=btc_ret_4h(), classifier_result=result,
+                    adjudicated=exec_adj,
+                )
+                executor.maybe_execute(
+                    market=live_market, plan=plan, metadata=metadata,
+                    adjudicated=exec_adj, tier=2, news_items=None,
+                )
+            except Exception as e:
+                log.exception("Tier 2 executor hook failed for %s: %s", ticker, e)
+
             promoted_alert = Alert(
                 ticker=ticker,
                 asset_class=str(entry.get("asset_class") or live_market.asset_class),
@@ -932,9 +1024,19 @@ async def main_async() -> None:
         except Exception as e:
             log.exception("Backfill blew up — continuing without it: %s", e)
 
+    # Boot reconciliation (§4.6) — never start blind. No-op unless EXECUTOR_LIVE.
+    if config.EXECUTOR_ENABLED and config.EXECUTOR_LIVE:
+        try:
+            from . import lighter_exec
+            await asyncio.to_thread(lighter_exec.reconcile_on_boot)
+        except Exception as e:
+            log.exception("Executor boot reconciliation failed: %s", e)
+
     loops = [tier1_discovery_scan(), tier2_trigger_watch()]
     if config.HOURLY_REPORT_ENABLED:
         loops.append(tier3_hourly_report())
+    if config.EXECUTOR_ENABLED:
+        loops.append(exit_engine.exit_loop())
     await asyncio.gather(*loops)
 
 
@@ -942,6 +1044,7 @@ def _graceful_shutdown(signum: int, frame: Any) -> None:  # noqa: ARG001
     global _RUNNING
     log.info("received signal %d — shutting down after current cycle", signum)
     _RUNNING = False
+    exit_engine.stop()
 
 
 def main() -> None:
