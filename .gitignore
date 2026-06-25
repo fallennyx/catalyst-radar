@@ -34,3 +34,9 @@ data/news_archive.json
 .idea/
 .vscode/
 *.swp
+
+# Local scratch / session artifacts (never publish)
+favoritesession.txt
+*session*.txt
+data/quant_writeup_raw_material.md
+data/*_raw_material.md
