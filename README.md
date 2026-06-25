@@ -1,26 +1,38 @@
 # Catalyst Radar
 
 A single-process Python engine that scans the live Lighter DEX perp universe
-(~163 markets across crypto / equity / commodity / forex) every five minutes,
-ranks unusual movers by a composite vol-normalized score, fetches catalysts
-from asset-routed news sources, classifies them with Claude Haiku, applies a
-five-rule suppression chain (BOS structural break is Rule 0), and pushes
-survivors to Telegram with a deterministic SL/TP plan.
+(~163 markets across crypto / equity / commodity / forex) every minute, ranks
+unusual movers by a composite vol-normalized score, fetches catalysts from
+asset-routed news sources, classifies them with an LLM (Groq Llama 3.3 70B;
+Gemini / Haiku fallback), confirms a structural break of structure (BOS), and
+pushes survivors to Telegram with a deterministic SL/TP plan — and, as of v1 of
+the **execution layer**, sizes and (optionally) places a real risk-managed
+position on Lighter.
+
+> **Disclaimer.** This is a personal research project, not financial advice and
+> not a product. It places real-money orders only when explicitly armed
+> (`EXECUTOR_LIVE=True`), and that live path is **unverified** (see
+> [Going live](#going-live--g0-verification)). Trading perps is risky and you can
+> lose money. Use at your own risk; no warranty (see [LICENSE](./LICENSE)).
 
 ## Architecture
 
-Three cooperating asyncio loops in one process:
+Four cooperating asyncio loops in one process:
 
 ```
-Tier 1 (5 min)  universe → ranker → catalysts → classifier → suppression
-                  → EMIT (BOS confirmed) or WATCHLIST (BOS pending) or DROP
+Tier 1 (60 s)   universe → ranker → catalysts → classifier → adjudicator →
+                  suppression → EMIT / WATCHLIST / DROP. On EMIT, the executor
+                  hook sizes + captures + (optionally) places a position.
 
 Tier 2 (60 s)   poll active watchlist tickers for live mark-price crosses
                   against stored 4h swing references → promote to EMIT on
-                  confirmed cross + 1h range expansion
+                  confirmed cross + range expansion (also runs the executor hook)
 
 Tier 3 (1 h)    Telegram heartbeat: active watchlist, recent top movers,
                   universe size, last-scan age (doubles as engine-alive signal)
+
+Exit engine     mark every open position per-minute, apply the asymmetric +1h
+  (60 s)          exit rule, write the intrabar dataset (simulated in shadow mode)
 ```
 
 On boot, before the loops start, the engine runs a **gap-aware backfill** of
@@ -29,21 +41,49 @@ equity/commodity/forex) so the BOS engine can fire on cycle 1 instead of
 waiting ~5.5 days. Restarts on a populated DB skip in ~5 seconds. SQLite
 auto-prunes to 30 days once per day from the Tier 1 loop.
 
-Single Python process. No threading. No microservices. No web dashboard.
-SQLite for state. See [`CLAUDE.md`](./CLAUDE.md) for the full design guide
-and [`BOS_FILTER_NOTES.md`](./BOS_FILTER_NOTES.md) for the BOS engine rationale.
+Single Python process, single asyncio loop (the only threading is the sync↔async
+bridge in `lighter_exec`). No microservices. No web dashboard. SQLite for state.
+See [`CLAUDE.md`](./CLAUDE.md) for the full design guide,
+[`BOS_FILTER_NOTES.md`](./BOS_FILTER_NOTES.md) for the BOS engine rationale, and
+[`EXECUTOR_SPEC.md`](./EXECUTOR_SPEC.md) for the execution-layer build spec.
+
+## Execution layer
+
+Each EMIT is turned into a sized, risk-managed position by `radar/executor.py`,
+behind a **two-stage master switch** in `radar/config.py`:
+
+- **`EXECUTOR_ENABLED`** (default `True`) — run the full decision + data-capture
+  pipeline on every EMIT and let the exit engine **simulate counterfactual
+  exits**. Never touches the exchange. This "shadow mode" is the v1 deliverable:
+  the per-minute intrabar dataset (`position_marks`) that a close-to-close
+  backtest can't produce.
+- **`EXECUTOR_LIVE`** (default `False`) — additionally place **real-money** orders
+  on Lighter via `radar/lighter_exec.py`. ⚠️ The live path is **unverified** —
+  run the [G0 verification](#going-live--g0-verification) before enabling it.
+
+The pipeline: **tier-gate** (§2 — backtest-validated `alpha_z` / `score_pctile`
+features; v1 ships Tier A only) → **risk-defined sizing** (§3 — the dollar loss
+at the stop is fixed at `MAX_LOSS_PER_TRADE_USD` regardless of stop width;
+leverage never sizes) → **circuit breaker** (§6 — daily loss / trade caps,
+consecutive-loss halt, kill-switch file) → **data capture** (§10 — eight SQLite
+tables, every trade-linked row stamped with `config_version_id`) → place. The
+exit engine (§5) marks each position per-minute and applies the asymmetric rule:
+cut flat/red at +1h, let a working Tier-A runner ride to +4h on a
+breakeven-then-trail. Server-side stops live on the exchange, so a VPS death
+mid-trade does not unprotect the position.
 
 ## Quick start
 
 ```bash
 # 1. Configure
 cp .env.example .env
-$EDITOR .env   # ANTHROPIC_API_KEY, TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID
+$EDITOR .env   # GROQ_API_KEY, TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID
+               # (live trading also needs LIGHTER_PRIVATE_KEY + LIGHTER_ACCOUNT_INDEX)
 
 # 2. Verify Telegram works before deploying anywhere
 python scripts/telegram_smoketest.py
 
-# 3. Run with Docker (recommended for prod)
+# 3. Run with Docker (recommended for prod) — shadow mode by default
 docker compose up -d --build
 docker compose logs -f radar
 
@@ -52,17 +92,56 @@ pip install -e ".[dev]"
 python -m radar.main
 ```
 
+Out of the box the executor runs in **shadow mode** (`EXECUTOR_LIVE=False`): it
+makes the full sizing decision and records the dataset, but places no orders.
+See [Going live](#going-live--g0-verification) to enable real trading.
+
 ## Tests
 
 ```bash
 pip install -e ".[dev]"
-pytest tests/                          # 175 tests
+pytest tests/                          # 240 tests
+pytest tests/test_executor.py -x       # executor: tiering / sizing / breaker / exit
 pytest tests/test_main.py -x           # one module
 ```
 
 All external services (Coinbase, Bybit, Binance, CoinGecko, yfinance, GDELT,
-Anthropic, Telegram, Lighter SDK) are mocked. Tests use the `tmp_db` fixture
-for SQLite isolation.
+Groq/Gemini/Anthropic, Telegram, Lighter SDK) are mocked. Tests use the
+`tmp_db` fixture for SQLite isolation.
+
+## Going live — G0 verification
+
+The live order path (`radar/lighter_exec.py`) is written against the documented
+Lighter SDK but has **never placed a real order**. Before trusting it, run this
+1-contract smoke test (the `EXECUTOR_SPEC.md` §9 G0 gate). Requires
+`pip install -e .` so `lighter-sdk` resolves, plus `LIGHTER_PRIVATE_KEY`,
+`LIGHTER_ACCOUNT_INDEX`, and `LIGHTER_API_KEY` in `.env`.
+
+```bash
+# 1. In radar/config.py, shrink risk and arm the live path:
+#      MAX_LOSS_PER_TRADE_USD = 1.0     # $1 risk for the test
+#      EXECUTOR_LIVE          = True
+#    Keep EXECUTOR_ENABLED_TIERS = {"A"} (Tier A only).
+
+# 2. Start the bot and wait for a BTC Tier-A EMIT → 1-contract market buy.
+python -m radar.main
+#    Confirm in the Lighter UI: position open AND a server-side stop resting.
+
+# 3. Kill the bot while the position is open:
+kill -TERM <pid>          # graceful shutdown
+#   — or — touch the kill-switch (halts new entries; stops stay server-side):
+touch /tmp/radar_halt
+
+# 4. Restart. Boot reconciliation queries live positions/orders and logs each
+#    open position + whether a tracked stop exists:
+python -m radar.main      # grep the logs for "RECONCILE" / "reconciliation found"
+
+# 5. Cancel the stop + flatten manually in the Lighter UI. Then revert:
+#    EXECUTOR_LIVE = False, MAX_LOSS_PER_TRADE_USD = 5.0, rm /tmp/radar_halt
+```
+
+Only after G0 passes should you widen the aperture (Tier B → C-pop), and only
+once `position_marks` confirms stops survive intrabar noise (§9 G2/G3).
 
 ## Replay against historical data
 
@@ -160,13 +239,18 @@ counts = replay(
 ## Tuning
 
 All knobs live in [`radar/config.py`](./radar/config.py): asset universe,
-cadence, ranker weights, suppression thresholds, LLM model, RSS feeds. New
+cadence, ranker weights, suppression thresholds, LLM model, RSS feeds. Key
 operational sections:
 
 - `BACKFILL_*` — startup gap-aware backfill behavior (enabled, per-ticker
   timeout, skip-if-fresh threshold)
 - `PRUNE_*` — retention (default: 30 days for bars + alerts, pruned once per day)
 - `HOURLY_REPORT_*` — Tier 3 heartbeat cadence + content caps
+- **`EXECUTOR` block** (bottom of the file) — `EXECUTOR_ENABLED` / `EXECUTOR_LIVE`
+  master switches, `EXECUTOR_ENABLED_TIERS`, tier gates (§2), sizing +
+  `MAX_LOSS_PER_TRADE_USD` (§3), exit-engine timing (§5), and circuit-breaker
+  limits + `KILL_SWITCH_FILE` (§6). Changing any of these mints a new
+  `config_versions` row so the captured dataset stays segmentable by rule-set.
 
 ## Deploy
 
